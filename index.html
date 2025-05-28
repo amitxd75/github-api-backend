@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Netlify Serverless API</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; }
+    #result { white-space: pre-wrap; background: #f4f4f4; padding: 1em; border-radius: 5px; }
+    .success { color: green; }
+    .error { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Netlify Serverless API is Working!</h1>
+  <p>Try fetching your GitHub profile using the API proxy:</p>
+  <form id="api-form">
+    <label>
+      GitHub API Endpoint:<br>
+      <input type="text" id="endpoint" value="/users/octocat" style="width:300px;">
+    </label>
+    <button type="submit">Fetch</button>
+  </form>
+  <h2>Result:</h2>
+  <div id="result"></div>
+  <script>
+    document.getElementById('api-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const endpoint = document.getElementById('endpoint').value;
+      const resultDiv = document.getElementById('result');
+      resultDiv.textContent = "Loading...";
+      try {
+        const res = await fetch(`/api/github?endpoint=${encodeURIComponent(endpoint)}`);
+        const data = await res.json();
+        resultDiv.textContent = JSON.stringify(data, null, 2);
+        resultDiv.className = res.ok ? 'success' : 'error';
+      } catch (err) {
+        resultDiv.textContent = "Error: " + err;
+        resultDiv.className = 'error';
+      }
+    };
+  </script>
+</body>
+</html>
