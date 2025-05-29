@@ -59,11 +59,20 @@ githubRouter.get('/', async (req: Request, res: Response) => {
     if (shouldUseCache && cache[endpoint]) {
       if (now - cache[endpoint].lastUpdated < CACHE_DURATION) {
         console.log(`Cache hit for endpoint: ${endpoint}`);
-        return res.json({
-          ...cache[endpoint].data,
-          _cached: true,
-          _cacheAge: Math.floor((now - cache[endpoint].lastUpdated) / 1000)
-        });
+        
+        // Return cached data directly without wrapping in object
+        const cachedData = cache[endpoint].data;
+        
+        // Add cache metadata only if it's not already an array
+        if (Array.isArray(cachedData)) {
+          return res.json(cachedData);
+        } else {
+          return res.json({
+            ...cachedData,
+            _cached: true,
+            _cacheAge: Math.floor((now - cache[endpoint].lastUpdated) / 1000)
+          });
+        }
       }
     }
 
@@ -116,13 +125,17 @@ githubRouter.get('/', async (req: Request, res: Response) => {
     // Parse successful response
     const data = await response.json();
     
-    // Ensure data is an object
-    if (typeof data !== 'object' || data === null) {
+    // Validate that we received valid data
+    if (data === null || data === undefined) {
       return res.status(500).json({
-        error: 'Invalid data received from GitHub API',
-        details: 'Response is not an object'
+        error: 'No data received from GitHub API',
+        endpoint: endpoint
       });
     }
+
+    // Log the type of data we received for debugging
+    console.log(`Data type received from ${endpoint}:`, Array.isArray(data) ? 'array' : typeof data);
+    console.log(`Data length/keys:`, Array.isArray(data) ? data.length : Object.keys(data || {}).length);
 
     // Store in cache if enabled
     if (shouldUseCache) {
@@ -133,7 +146,13 @@ githubRouter.get('/', async (req: Request, res: Response) => {
       console.log(`Cached data for endpoint: ${endpoint}`);
     }
 
-    // Add metadata to response
+    // For array responses (like repos), return the array directly
+    if (Array.isArray(data)) {
+      console.log(`Returning array with ${data.length} items for ${endpoint}`);
+      return res.json(data);
+    }
+
+    // For object responses (like user data), add metadata
     const responseData = {
       ...data,
       _metadata: {
