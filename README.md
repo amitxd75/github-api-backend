@@ -1,179 +1,222 @@
+---
+
+```markdown
 # GitHub API Backend
 
-A standalone TypeScript/Express.js backend that provides a proxy for the GitHub API with caching capabilities.
+An intelligent GitHub proxy and stats aggregator with smart caching, error handling, and optional Netlify deployment.
 
-## Features
+---
 
-- **GitHub API Proxy**: Securely proxy requests to GitHub API
-- **Built-in Caching**: 14-day cache for improved performance
-- **Rate Limit Handling**: Proper handling of GitHub API rate limits
-- **CORS Support**: Configurable cross-origin resource sharing
-- **Security**: Helmet.js for security headers
-- **Error Handling**: Comprehensive error handling and logging
-- **Health Checks**: Built-in health check endpoint
-- **TypeScript**: Full TypeScript support with type safety
+## Netlify Deployment Guide
 
-## Quick Start
+This guide will help you deploy the GitHub API Backend to Netlify Functions.
 
-### 1. Install Dependencies
-```bash
-npm install
+### Prerequisites
+
+- Netlify account
+- GitHub repository
+- GitHub token (optional, for higher rate limits)
+
+### Step 1: Prepare Repository
+
+Ensure your project structure includes:
+
 ```
 
-### 2. Setup Environment
+├── netlify/
+│   └── functions/
+│       └── api.ts
+├── src/
+│   ├── routes/
+│   │   └── github.ts
+│   ├── middleware/
+│   │   ├── errorHandler.ts
+│   │   └── requestLogger.ts
+|   |__ types.ts
+│   └── server.ts
+├── package.json
+├── tsconfig.json
+└── netlify.toml (optional)
+
+````
+
+Create `netlify.toml` (optional):
+
+```toml
+[build]
+  functions = "netlify/functions"
+  publish = "public"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/health"
+  to = "/.netlify/functions/api/health"
+  status = 200
+
+[[redirects]]
+  from = "/"
+  to = "/.netlify/functions/api/api"
+  status = 200
+
+[build.environment]
+  NODE_VERSION = "18"
+````
+
+### Step 2: Deploy to Netlify
+
+#### Option A: Netlify UI
+
+1. Connect GitHub repo
+2. Configure build:
+
+   * Build command: `npm run build`
+   * Publish dir: `public` or leave empty
+   * Functions dir: `netlify/functions`
+3. Add env vars:
+
+   ```
+   GITHUB_TOKEN=
+   NODE_ENV=production
+   ALLOWED_ORIGINS=https://yourdomain.com,http://localhost:3000
+   ```
+4. Deploy
+
+#### Option B: Netlify CLI
+
 ```bash
-cp .env.example .env
-# Edit .env with your configuration
+npm install -g netlify-cli
+netlify login
+netlify init
+netlify deploy --prod
+netlify env:set GITHUB_TOKEN your_token
+netlify env:set NODE_ENV production
+netlify env:set ALLOWED_ORIGINS "https://yourdomain.com,http://localhost:3000"
 ```
 
-### 3. Development
-```bash
-npm run dev
+---
+
+## API Documentation (v2)
+
+### Base URLs
+
+```
+Local:    http://localhost:3001
+Netlify:  https://your-site.netlify.app/.netlify/functions/api
 ```
 
-### 4. Production Build
-```bash
-npm run build
-npm start
+### Endpoints
+
+#### `GET /api/github/v2/?endpoint=<path>&cache=<true|false>`
+
+Proxy GitHub REST API.
+
+Example:
+
 ```
+/api/github/v2/?endpoint=/users/amitminer
+```
+
+#### `GET /api/github/v2/stats?username=<username>&force=<true|false>`
+
+Aggregated GitHub stats with caching.
+
+Example:
+
+```
+/api/github/v2/stats?username=amitxd75
+```
+
+#### `GET /api/github/v2/cache/status`
+
+View current cache stats.
+
+#### `DELETE /api/github/v2/cache`
+
+Clear all cache entries.
+
+#### `DELETE /api/github/v2/cache/:endpoint`
+
+Clear specific cached endpoint (e.g., `stats_amitxd75` or `/users/octocat`).
+
+---
+
+### Python Usage
+
+```python
+import requests
+
+# Fetch GitHub stats
+def fetch_stats(username, force=False):
+  res = requests.get(
+    "https://your-site.netlify.app/.netlify/functions/api/api/github/v2/stats",
+    params={"username": username, "force": str(force).lower()}
+  )
+  res.raise_for_status()
+  return res.json()
+
+# Proxy GitHub endpoint 
+def proxy(endpoint):
+  res = requests.get(
+    "https://your-site.netlify.app/.netlify/functions/api/api/github/v2/",
+    params={"endpoint": endpoint}
+  )
+  res.raise_for_status()
+  return res.json()
+```
+
+For more API usage examples and detailed documentation, please refer to [API_DOCUMENTATION.md](./API_DOCUMENTATION.md)
+
+
+---
+
+### Caching
+
+* `?endpoint` requests: 14 days
+* `/stats`: 6 hours
+* Use `force=true` to bypass
+
+---
 
 ## Environment Variables
 
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `PORT` | Server port | No | `3001` |
-| `NODE_ENV` | Environment mode | No | `development` |
-| `GITHUB_TOKEN` | GitHub Personal Access Token | Recommended | - |
-| `ALLOWED_ORIGINS` | Comma-separated CORS origins | No | `http://localhost:3000` |
+| Name              | Required | Description                           |
+| ----------------- | -------- | ------------------------------------- |
+| `GITHUB_TOKEN`    | Optional | Enables higher GitHub API rate limit  |
+| `NODE_ENV`        | No       | Set to `production` or `development`  |
+| `ALLOWED_ORIGINS` | No       | CORS policy origins (comma-separated) |
 
-## API Endpoints
+---
 
-### GitHub API Proxy
+## Debug & Monitoring
+
+* Enable debug: `netlify env:set NODE_ENV development`
+* View logs: Netlify dashboard → Functions → Logs
+* Monitor usage: Build logs, analytics, error handling
+
+---
+
+## Performance Tips
+
+* Avoid repeated `force=true` unless needed
+* Use GitHub tokens in production
+* Keep bundle size minimal via esbuild
+* Use pre-aggregated stats over raw proxy calls when possible
+
+---
+
+## Deployment URLs (Examples)
+
+* Health Check: `https://your-site.netlify.app/.netlify/functions/api/health`
+* API Docs: `https://your-site.netlify.app/.netlify/functions/api/api`
+* GitHub Stats: `https://your-site.netlify.app/.netlify/functions/api/api/github/v2/stats?username=username`
+* Proxy GitHub: `https://your-site.netlify.app/.netlify/functions/api/api/github/v2/?endpoint=/users/username`
+
 ```
-GET /api/github?endpoint=<github-endpoint>&cache=<true|skills>
-```
-
-**Examples:**
-- Get user repos: `/api/github?endpoint=/users/username/repos`
-- Get specific repo: `/api/github?endpoint=/repos/username/repo-name`
-- With caching: `/api/github?endpoint=/users/username/repos&cache=true`
-
-### Cache Management
-- `GET /api/github/cache/status` - View cache status
-- `DELETE /api/github/cache` - Clear all cache
-- `DELETE /api/github/cache/*` - Clear specific endpoint cache
-
-### Health Check
-```
-GET /health
-```
-
-## Usage Examples
-
-### Basic Repository Fetch
-```javascript
-const response = await fetch('http://localhost:3001/api/github?endpoint=/users/octocat/repos');
-const repos = await response.json();
-```
-
-### With Caching Enabled
-```javascript
-const response = await fetch('http://localhost:3001/api/github?endpoint=/users/octocat/repos&cache=true');
-const repos = await response.json();
-```
-
-### Error Handling
-```javascript
-try {
-  const response = await fetch('http://localhost:3001/api/github?endpoint=/users/nonexistent/repos');
-  
-  if (!response.ok) {
-    const error = await response.json();
-    console.error('API Error:', error);
-    return;
-  }
-  
-  const data = await response.json();
-  console.log('Success:', data);
-} catch (error) {
-  console.error('Network Error:', error);
-}
-```
-
-## Deployment
-
-### Using PM2
-```bash
-npm install -g pm2
-npm run build
-pm2 start dist/server.js --name "github-api-backend"
-```
-
-### Using Docker
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY dist ./dist
-EXPOSE 3001
-CMD ["node", "dist/server.js"]
-```
-
-### Environment-specific Deployment
-
-**Development:**
-```bash
-NODE_ENV=development npm run dev
-```
-
-**Production:**
-```bash
-NODE_ENV=production npm run build && npm start
-```
-
-## Security Considerations
-
-1. **GitHub Token**: Use a GitHub Personal Access Token for higher rate limits
-2. **CORS**: Configure `ALLOWED_ORIGINS` for your frontend domains
-3. **Environment**: Never commit `.env` files
-4. **Rate Limiting**: Consider adding rate limiting for public deployments
-
-## Monitoring
-
-The backend includes comprehensive logging:
-- Request/response logging
-- Error tracking
-- Cache hit/miss logging
-- Rate limit monitoring
-
-## Troubleshooting
-
-### Common Issues
-
-**Rate Limit Exceeded:**
-- Add `GITHUB_TOKEN` to your `.env` file
-- Check rate limit status in API responses
-
-**CORS Errors:**
-- Add your frontend domain to `ALLOWED_ORIGINS`
-- Ensure origins include protocol (http/https)
-
-**Network Issues:**
-- Check internet connectivity
-- Verify GitHub API status
-
-### Debug Mode
-Set `NODE_ENV=development` for detailed error messages and stack traces.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## License
-
-MIT License - see LICENSE file for details

@@ -1,40 +1,160 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Netlify Serverless API</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GitHub API Backend v2.0 - Tester</title>
   <style>
-    body { font-family: sans-serif; margin: 2em; }
-    #result { white-space: pre-wrap; background: #f4f4f4; padding: 1em; border-radius: 5px; }
-    .success { color: green; }
-    .error { color: red; }
+    :root {
+      --bg: #1e1e2f;
+      --text: #eaeaea;
+      --accent: #00b7ff;
+      --success: #4caf50;
+      --error: #ff4d4f;
+      --input-bg: #2b2b3d;
+      --border: #444;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 2rem;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+    }
+
+    h1, h2 {
+      color: var(--accent);
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      max-width: 600px;
+      margin-bottom: 2rem;
+      background: #262636;
+      padding: 1.5rem;
+      border-radius: 10px;
+    }
+
+    label {
+      font-weight: 500;
+    }
+
+    input {
+      width: 100%;
+      padding: 0.7rem;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--input-bg);
+      color: var(--text);
+      font-size: 1rem;
+    }
+
+    button {
+      padding: 0.75rem 1.2rem;
+      background-color: var(--accent);
+      color: white;
+      border: none;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: background 0.2s ease;
+    }
+
+    button:hover {
+      background-color: #0099cc;
+    }
+
+    #result {
+      white-space: pre-wrap;
+      background: #121217;
+      padding: 1rem;
+      border-radius: 8px;
+      border-left: 4px solid transparent;
+      overflow-x: auto;
+      font-family: monospace;
+      font-size: 0.95rem;
+      color: #eaeaea;
+    }
+
+    .success {
+      border-color: var(--success);
+    }
+
+    .error {
+      border-color: var(--error);
+      color: var(--error);
+    }
+
+    @media (max-width: 600px) {
+      body {
+        padding: 1rem;
+      }
+
+      form {
+        padding: 1rem;
+      }
+
+      input, button {
+        font-size: 1rem;
+      }
+    }
   </style>
 </head>
 <body>
-  <h1>Netlify Serverless API is Working!</h1>
-  <p>Try fetching your GitHub profile using the API proxy:</p>
+  <h1>🌐 GitHub API Backend v2.0</h1>
+  <p>Test your <code>/v2/stats</code> and <code>?endpoint=</code> queries here:</p>
+
   <form id="api-form">
-    <label>
-      GitHub API Endpoint:<br>
-      <input type="text" id="endpoint" value="/users/octocat" style="width:300px;">
-    </label>
-    <button type="submit">Fetch</button>
+    <label for="endpoint">GitHub API Endpoint (e.g. <code>/users/octocat</code>):</label>
+    <input type="text" id="endpoint" value="/users/octocat" />
+
+    <label for="username">GitHub Username (for /stats):</label>
+    <input type="text" id="username" value="amitxd75" />
+
+    <button type="submit">Fetch Both</button>
   </form>
-  <h2>Result:</h2>
-  <div id="result"></div>
+
+  <h2>📦 Result</h2>
+  <div id="result">Waiting for request...</div>
+
   <script>
     document.getElementById('api-form').onsubmit = async (e) => {
       e.preventDefault();
-      const endpoint = document.getElementById('endpoint').value;
+
+      const endpoint = document.getElementById('endpoint').value.trim();
+      const username = document.getElementById('username').value.trim();
       const resultDiv = document.getElementById('result');
-      resultDiv.textContent = "Loading...";
+
+      resultDiv.textContent = "⏳ Loading...";
+      resultDiv.className = "";
+
       try {
-        const res = await fetch(`/api/github?endpoint=${encodeURIComponent(endpoint)}`);
-        const data = await res.json();
-        resultDiv.textContent = JSON.stringify(data, null, 2);
-        resultDiv.className = res.ok ? 'success' : 'error';
+        const [proxyRes, statsRes] = await Promise.all([
+          fetch(`/api/github/v2/?endpoint=${encodeURIComponent(endpoint)}`),
+          fetch(`/api/github/v2/stats?username=${encodeURIComponent(username)}`)
+        ]);
+
+        const proxyData = await proxyRes.json();
+        const statsData = await statsRes.json();
+
+        let output = `🔗 /v2/?endpoint=${endpoint}\n\n` +
+                     JSON.stringify(proxyData, null, 2) + `\n\n` +
+                     `📊 /v2/stats?username=${username}\n\n` +
+                     JSON.stringify(statsData, null, 2);
+
+        resultDiv.textContent = output;
+        resultDiv.className = proxyRes.ok && statsRes.ok ? 'success' : 'error';
       } catch (err) {
-        resultDiv.textContent = "Error: " + err;
+        resultDiv.textContent = "❌ Error: " + err.message;
         resultDiv.className = 'error';
       }
     };

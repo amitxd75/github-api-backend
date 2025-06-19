@@ -1,21 +1,29 @@
 {
   "name": "github-api-backend",
-  "version": "1.0.0",
-  "description": "Standalone backend for GitHub API proxy",
+  "version": "2.0.0",
+  "description": "Enhanced GitHub API backend with comprehensive stats endpoint, intelligent caching, and robust error handling",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "test": "echo \"No tests specified\" && exit 0",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
   },
   "keywords": [
     "github",
     "api",
     "proxy",
-    "backend"
+    "backend",
+    "stats",
+    "typescript",
+    "express",
+    "netlify",
+    "serverless"
   ],
-  "author": "Your Name",
+  "author": "amitxd75",
   "license": "MIT",
   "dependencies": {
     "@netlify/functions": "^3.1.10",
@@ -35,5 +43,13 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amitxd75/github-api-backend.git"
+  },
+  "bugs": {
+    "url": "https://github.com/amitxd75/github-api-backend/issues"
+  },
+  "homepage": "https://github.com/amitxd75/github-api-backend#readme"
 }

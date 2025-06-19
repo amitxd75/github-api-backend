@@ -35,7 +35,30 @@ app.get('/health', (req, res) => {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    version: process.env.npm_package_version || '1.0.0'
+    version: process.env.npm_package_version || '2.0.0'
+  });
+});
+
+// API documentation endpoint
+app.get('/api', (req, res) => {
+  res.json({
+    name: 'GitHub API Backend',
+    version: '2.0.0',
+    description: 'Enhanced GitHub API proxy with comprehensive stats endpoint',
+    endpoints: {
+      health: 'GET /health',
+      github: {
+        v2: {
+          stats: 'GET /api/github/v2/stats?username=<username>&force=<true|false>'
+        },
+        cache: {
+          status: 'GET /api/github/cache/status',
+          clear: 'DELETE /api/github/cache',
+          clearEndpoint: 'DELETE /api/github/cache/:endpoint'
+        }
+      }
+    },
+    documentation: 'https://github.com/amitxd75/github-api-backend'
   });
 });
 
