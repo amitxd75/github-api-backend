@@ -1,6 +1,4 @@
 ---
-
-```markdown
 # GitHub API Backend
 
 An intelligent GitHub proxy and stats aggregator with smart caching, error handling, and optional Netlify deployment.
@@ -218,5 +216,3 @@ For more API usage examples and detailed documentation, please refer to [API_DOC
 * API Docs: `https://your-site.netlify.app/.netlify/functions/api/api`
 * GitHub Stats: `https://your-site.netlify.app/.netlify/functions/api/api/github/v2/stats?username=username`
 * Proxy GitHub: `https://your-site.netlify.app/.netlify/functions/api/api/github/v2/?endpoint=/users/username`
-
-```
