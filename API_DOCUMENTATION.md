@@ -1,5 +1,3 @@
----
-
 # 🚀 GitHub API Backend v2.0 - API Documentation
 
 ## 🧭 Overview
