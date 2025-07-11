@@ -14,23 +14,45 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
-// CORS configuration for Netlify
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || [
-    'http://localhost:3000',
-    'https://amitminer.github.io',
-    'https://amitxd75.github.io'
-  ],
-  credentials: true,
-  optionsSuccessStatus: 200
-}));
-
 // Request parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Custom middleware
+// Custom request logger
 app.use(requestLogger);
+
+// Allowed origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
+  'http://localhost:3000',
+  'https://amitminer.github.io',
+  'https://amitxd75.github.io'
+];
+
+// ✅ Preflight OPTIONS handler (must come before routes)
+app.options('*', cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  optionsSuccessStatus: 200
+}));
+
+// ✅ CORS for all routes
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  optionsSuccessStatus: 200
+}));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -46,7 +68,7 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/github', githubRouter);
 
-// API documentation endpoint
+// API info endpoint
 app.get('/api', (req, res) => {
   res.json({
     name: 'GitHub API Backend',
@@ -70,7 +92,7 @@ app.get('/api', (req, res) => {
   });
 });
 
-// 404 handler
+// 404 fallback
 app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Route not found',
@@ -85,7 +107,7 @@ app.use('*', (req, res) => {
   });
 });
 
-// Error handling middleware
+// Central error handler
 app.use(errorHandler);
 
 export const handler = serverless(app);
