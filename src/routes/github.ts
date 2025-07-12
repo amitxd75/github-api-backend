@@ -8,6 +8,65 @@ const STATS_CACHE_DURATION = 1000 * 60 * 60 * 6; // 6 hours for stats
 export const githubRouter = Router();
 
 /**
+ * Fetch with retry logic for GitHub API calls
+ * Retries up to 2 times with exponential backoff for transient failures
+ * Skips retries for 401 (auth errors) and 403 (rate limits)
+ */
+async function fetchWithRetry(url: string, options: RequestInit, maxRetries: number = 2): Promise<Response> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      
+      // Don't retry on auth errors (401) or rate limits (403)
+      if (response.status === 401 || response.status === 403) {
+        return response;
+      }
+      
+      // Don't retry on successful responses or client errors (4xx except 401/403)
+      if (response.ok || (response.status >= 400 && response.status < 500)) {
+        return response;
+      }
+      
+      // For 5xx errors, retry if we have attempts left
+      if (response.status >= 500 && attempt < maxRetries) {
+        console.warn(`GitHub API returned ${response.status}, retrying in ${Math.pow(2, attempt)} seconds... (attempt ${attempt + 1}/${maxRetries + 1})`);
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        continue;
+      }
+      
+      return response;
+      
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('Unknown fetch error');
+      
+      // Check if it's a transient network error that we should retry
+      const isTransientError = error instanceof Error && (
+        error.message.includes('fetch failed') ||
+        error.message.includes('socket hang up') ||
+        error.message.includes('ECONNRESET') ||
+        error.message.includes('ETIMEDOUT') ||
+        error.message.includes('ENOTFOUND')
+      );
+      
+      if (isTransientError && attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000;
+        console.warn(`Network error: ${error.message}, retrying in ${delay/1000} seconds... (attempt ${attempt + 1}/${maxRetries + 1})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      // If it's not a transient error or we've exhausted retries, throw the error
+      throw error;
+    }
+  }
+  
+  // This should never be reached, but just in case
+  throw lastError || new Error('Max retries exceeded');
+}
+
+/**
  * GitHub API proxy endpoint
  * 
  * Usage examples:
@@ -80,11 +139,11 @@ githubRouter.get('/v2', async (req: Request, res: Response) => {
       headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
     }
 
-    // Make request to GitHub API
+    // Make request to GitHub API with retry logic
     const url = `https://api.github.com${endpoint}`;
     console.log(`Fetching from GitHub: ${url}`);
     
-    const response = await fetch(url, { headers });
+    const response = await fetchWithRetry(url, { headers });
 
     // Handle different response statuses
     if (!response.ok) {
@@ -246,8 +305,8 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
     headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
   }
 
-  // Fetch user data
-  const userResponse = await fetch(`https://api.github.com/users/${username}`, { headers });
+  // Fetch user data with retry logic
+  const userResponse = await fetchWithRetry(`https://api.github.com/users/${username}`, { headers });
   if (!userResponse.ok) {
     if (userResponse.status === 404) {
       throw new Error(`User '${username}' not found`);
@@ -259,15 +318,15 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
   }
   const userData = await userResponse.json() as GitHubUser;
 
-  // Fetch user repositories
-  const reposResponse = await fetch(`https://api.github.com/users/${username}/repos?per_page=100&sort=updated`, { headers });
+  // Fetch user repositories with retry logic
+  const reposResponse = await fetchWithRetry(`https://api.github.com/users/${username}/repos?per_page=100&sort=updated`, { headers });
   if (!reposResponse.ok) {
     throw new Error(`Failed to fetch repositories: ${reposResponse.status}`);
   }
   const reposData = await reposResponse.json() as GitHubRepo[];
 
-  // Fetch user events for activity data
-  const eventsResponse = await fetch(`https://api.github.com/users/${username}/events?per_page=100`, { headers });
+  // Fetch user events for activity data with retry logic
+  const eventsResponse = await fetchWithRetry(`https://api.github.com/users/${username}/events?per_page=100`, { headers });
   if (!eventsResponse.ok) {
     throw new Error(`Failed to fetch events: ${eventsResponse.status}`);
   }
@@ -304,7 +363,7 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
         const repoName = repo.name || repo.full_name?.split('/')[1];
         if (!repoName) return {};
         
-        const langResponse = await fetch(`https://api.github.com/repos/${username}/${repoName}/languages`, { headers });
+        const langResponse = await fetchWithRetry(`https://api.github.com/repos/${username}/${repoName}/languages`, { headers });
         if (langResponse.ok) {
           const languages = await langResponse.json() as Record<string, number>;
           return languages;
