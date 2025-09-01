@@ -1,16 +1,24 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response as ExpressResponse } from 'express';
 import { CacheEntry, GitHubEvent, GitHubRepo, GitHubStats, GitHubUser } from '../types';
 
+// In-memory cache for API responses.
 const cache: Record<string, CacheEntry> = {};
-const CACHE_DURATION = 1000 * 60 * 60 * 24 * 14; // 14 days
-const STATS_CACHE_DURATION = 1000 * 60 * 60 * 6; // 6 hours for stats
 
+// Cache duration constants.
+// CACHE_DURATION is for general API endpoints (14 days).
+const CACHE_DURATION = 1000 * 60 * 60 * 24 * 14; 
+// STATS_CACHE_DURATION is shorter for stats (6 hours).
+const STATS_CACHE_DURATION = 1000 * 60 * 60 * 6;
+
+// Export the router to be used in the main application.
 export const githubRouter = Router();
 
 /**
- * Fetch with retry logic for GitHub API calls
- * Retries up to 2 times with exponential backoff for transient failures
- * Skips retries for 401 (auth errors) and 403 (rate limits)
+ * Fetches data from a URL with built-in retry logic for transient network or API errors.
+ * @param url The URL to fetch.
+ * @param options The fetch options.
+ * @param maxRetries The maximum number of retries.
+ * @returns The fetch Response object.
  */
 async function fetchWithRetry(url: string, options: RequestInit, maxRetries: number = 2): Promise<Response> {
   let lastError: Error | null = null;
@@ -19,17 +27,16 @@ async function fetchWithRetry(url: string, options: RequestInit, maxRetries: num
     try {
       const response = await fetch(url, options);
       
-      // Don't retry on auth errors (401) or rate limits (403)
+      // Return immediately for successful or client-side errors (4xx).
       if (response.status === 401 || response.status === 403) {
         return response;
       }
       
-      // Don't retry on successful responses or client errors (4xx except 401/403)
       if (response.ok || (response.status >= 400 && response.status < 500)) {
         return response;
       }
       
-      // For 5xx errors, retry if we have attempts left
+      // Retry on server-side errors (5xx).
       if (response.status >= 500 && attempt < maxRetries) {
         console.warn(`GitHub API returned ${response.status}, retrying in ${Math.pow(2, attempt)} seconds... (attempt ${attempt + 1}/${maxRetries + 1})`);
         await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
@@ -41,7 +48,7 @@ async function fetchWithRetry(url: string, options: RequestInit, maxRetries: num
     } catch (error) {
       lastError = error instanceof Error ? error : new Error('Unknown fetch error');
       
-      // Check if it's a transient network error that we should retry
+      // Check for transient network errors to retry.
       const isTransientError = error instanceof Error && (
         error.message.includes('fetch failed') ||
         error.message.includes('socket hang up') ||
@@ -57,47 +64,33 @@ async function fetchWithRetry(url: string, options: RequestInit, maxRetries: num
         continue;
       }
       
-      // If it's not a transient error or we've exhausted retries, throw the error
+      // Re-throw if not a transient error or max retries exceeded.
       throw error;
     }
   }
   
-  // This should never be reached, but just in case
+  // Throw if all retries fail.
   throw lastError || new Error('Max retries exceeded');
 }
 
 /**
- * GitHub API proxy endpoint
- * 
- * Usage examples:
- * 1. Fetch user repos:
- *    GET /api/github/v2/?endpoint=/users/username/repos
- * 
- * 2. Fetch specific repo:
- *    GET /api/github/v2/?endpoint=/repos/username/repo-name
- *
- * 3. Fetch with caching:
- *    GET /api/github/v2/?endpoint=/users/username/repos&cache=true
- *
- * Query Parameters:
- * - endpoint: Required. The GitHub API endpoint to proxy (must start with /)
- * - cache: Set to 'true' to enable caching
+ * GET handler for general GitHub API endpoints.
+ * Supports caching to reduce API calls.
  */
-githubRouter.get('/v2', async (req: Request, res: Response) => {
+githubRouter.get('/v2', async (req: Request, res: ExpressResponse) => {
   try {
     const { endpoint, cache: cacheParam } = req.query;
 
-    // Validate endpoint parameter
+    // Validate request parameters.
     if (!endpoint || typeof endpoint !== 'string') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Endpoint parameter required',
         usage: 'GET /api/github/v2?endpoint=/users/username/repos'
       });
     }
 
-    // Ensure endpoint starts with /
     if (!endpoint.startsWith('/')) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Endpoint must start with /',
         provided: endpoint,
         example: '/users/username/repos'
@@ -107,15 +100,14 @@ githubRouter.get('/v2', async (req: Request, res: Response) => {
     const now = Date.now();
     const shouldUseCache = cacheParam === 'true';
 
-    // Check cache if enabled
+    // Check for a valid cache entry.
     if (shouldUseCache && cache[endpoint]) {
       if (now - cache[endpoint].lastUpdated < CACHE_DURATION) {
         console.log(`Cache hit for endpoint: ${endpoint}`);
         
-        // Return cached data directly without wrapping in object
         const cachedData = cache[endpoint].data;
         
-        // Add cache metadata only if it's not already an array
+        // Return cached data with metadata.
         if (Array.isArray(cachedData)) {
           return res.json(cachedData);
         } else {
@@ -128,24 +120,24 @@ githubRouter.get('/v2', async (req: Request, res: Response) => {
       }
     }
 
-    // Prepare headers for GitHub API
+    // Set up headers for the GitHub API request.
     const headers: Record<string, string> = {
       'Accept': 'application/vnd.github.v3+json',
       'User-Agent': 'Portfolio-Backend/2.0',
     };
 
-    // Add authorization if token is available and valid
+    // Add GitHub token if available for higher rate limits.
     if (process.env.GITHUB_TOKEN && process.env.GITHUB_TOKEN !== '****************iiNA') {
       headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
     }
 
-    // Make request to GitHub API with retry logic
     const url = `https://api.github.com${endpoint}`;
     console.log(`Fetching from GitHub: ${url}`);
     
+    // Fetch data from GitHub with retry logic.
     const response = await fetchWithRetry(url, { headers });
 
-    // Handle different response statuses
+    // Handle API errors.
     if (!response.ok) {
       if (response.status === 401) {
         return res.status(401).json({
@@ -183,10 +175,8 @@ githubRouter.get('/v2', async (req: Request, res: Response) => {
       });
     }
 
-    // Parse successful response
     const data = await response.json();
     
-    // Validate that we received valid data
     if (data === null || data === undefined) {
       return res.status(500).json({
         error: 'No data received from GitHub API',
@@ -194,7 +184,7 @@ githubRouter.get('/v2', async (req: Request, res: Response) => {
       });
     }
 
-    // Store in cache if enabled
+    // Cache the new data if caching is enabled.
     if (shouldUseCache) {
       cache[endpoint] = {
         data,
@@ -203,13 +193,12 @@ githubRouter.get('/v2', async (req: Request, res: Response) => {
       console.log(`Cached data for endpoint: ${endpoint}`);
     }
 
-    // For array responses (like repos), return the array directly
+    // Return the fetched data.
     if (Array.isArray(data)) {
       console.log(`Returning array with ${data.length} items for ${endpoint}`);
       return res.json(data);
     }
 
-    // For object responses (like user data), add metadata
     const responseData = {
       ...data,
       _metadata: {
@@ -228,8 +217,8 @@ githubRouter.get('/v2', async (req: Request, res: Response) => {
   } catch (error: unknown) {
     console.error('GitHub API proxy error:', error);
 
+    // Handle specific errors.
     if (error instanceof Error) {
-      // Handle network errors
       if (error.message.includes('fetch failed') || (error as any).code === 'ENOTFOUND') {
         return res.status(503).json({
           error: 'Network connectivity issue - cannot reach GitHub API',
@@ -251,8 +240,10 @@ githubRouter.get('/v2', async (req: Request, res: Response) => {
   }
 });
 
-// Cache management endpoints
-githubRouter.get('/v2/cache/status', (req: Request, res: Response) => {
+/**
+ * GET handler to check cache status.
+ */
+githubRouter.get('/v2/cache/status', (req: Request, res: ExpressResponse) => {
   const entries = Object.keys(cache).length;
   const totalSize = JSON.stringify(cache).length;
   
@@ -264,10 +255,12 @@ githubRouter.get('/v2/cache/status', (req: Request, res: Response) => {
   });
 });
 
-githubRouter.delete('/v2/cache', (req: Request, res: Response) => {
+/**
+ * DELETE handler to clear the entire cache.
+ */
+githubRouter.delete('/v2/cache', (req: Request, res: ExpressResponse) => {
   const entriesCleared = Object.keys(cache).length;
   
-  // Clear all cache entries
   for (const key in cache) {
     delete cache[key];
   }
@@ -278,7 +271,10 @@ githubRouter.delete('/v2/cache', (req: Request, res: Response) => {
   });
 });
 
-githubRouter.delete('/v2/cache/:endpoint(*)', (req: Request, res: Response) => {
+/**
+ * DELETE handler to clear a specific cache entry.
+ */
+githubRouter.delete('/v2/cache/:endpoint(*)', (req: Request, res: ExpressResponse) => {
   const endpoint = `/${req.params.endpoint}`;
   
   if (cache[endpoint]) {
@@ -293,9 +289,13 @@ githubRouter.delete('/v2/cache/:endpoint(*)', (req: Request, res: Response) => {
   }
 });
 
-// Helper function to fetch GitHub stats
+/**
+ * Fetches and calculates a user's comprehensive GitHub statistics.
+ * @param username The GitHub username.
+ * @returns A promise that resolves to a GitHubStats object.
+ */
 const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
-  // Prepare headers for GitHub API
+  // Set up headers for the GitHub API.
   const headers: Record<string, string> = {
     'Accept': 'application/vnd.github.v3+json',
     'User-Agent': 'Portfolio-Backend/2.0',
@@ -305,7 +305,7 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
     headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
   }
 
-  // Fetch user data with retry logic
+  // Fetch user, repo, and event data in parallel.
   const userResponse = await fetchWithRetry(`https://api.github.com/users/${username}`, { headers });
   if (!userResponse.ok) {
     if (userResponse.status === 404) {
@@ -318,27 +318,24 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
   }
   const userData = await userResponse.json() as GitHubUser;
 
-  // Fetch user repositories with retry logic
   const reposResponse = await fetchWithRetry(`https://api.github.com/users/${username}/repos?per_page=100&sort=updated`, { headers });
   if (!reposResponse.ok) {
     throw new Error(`Failed to fetch repositories: ${reposResponse.status}`);
   }
   const reposData = await reposResponse.json() as GitHubRepo[];
 
-  // Fetch user events for activity data with retry logic
   const eventsResponse = await fetchWithRetry(`https://api.github.com/users/${username}/events?per_page=100`, { headers });
   if (!eventsResponse.ok) {
     throw new Error(`Failed to fetch events: ${eventsResponse.status}`);
   }
   const eventsData = await eventsResponse.json() as GitHubEvent[];
 
-  // Process repository data
+  // Calculate total stars, forks, and recent activity.
   let totalStars = 0;
   let totalForks = 0;
   const oneMonthAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
   let recentRepoActivity = 0;
 
-  // Get non-fork repositories for language analysis
   const ownRepos = reposData.filter(repo => !repo.fork);
 
   for (const repo of ownRepos) {
@@ -350,11 +347,10 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
     }
   }
 
-  // Fetch language data for each repository (more accurate than using repo.size)
+  // Fetch language data for each repository in batches.
   const allLanguageBytes: Record<string, number> = {};
   let totalLanguageBytes = 0;
 
-  // Limit concurrent requests to avoid rate limiting
   const batchSize = 5;
   for (let i = 0; i < ownRepos.length; i += batchSize) {
     const batch = ownRepos.slice(i, i + batchSize);
@@ -386,24 +382,24 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
       }
     });
 
-    // Add a small delay between batches to be nice to the API
+    // Add a small delay between batches to avoid rate limiting.
     if (i + batchSize < ownRepos.length) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
 
-  // Calculate top languages with proper percentages
+  // Calculate top languages by percentage.
   const topLanguages = totalLanguageBytes > 0
     ? Object.fromEntries(
       Object.entries(allLanguageBytes)
         .map(([lang, bytes]) => [lang, Math.round((bytes / totalLanguageBytes) * 100)])
         .sort((a, b) => (b[1] as number) - (a[1] as number))
         .slice(0, 5)
-        .filter(([, percentage]) => (percentage as number) > 0) // Only include languages with >0%
+        .filter(([, percentage]) => (percentage as number) > 0)
     )
     : {};
 
-  // Process events data for activity stats
+  // Calculate total commits, PRs, and issues from events.
   let totalCommits = 0;
   let totalPRs = 0;
   let totalIssues = 0;
@@ -422,7 +418,7 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
     }
   });
 
-  // Calculate contribution streaks (simplified)
+  // Calculate current and longest contribution streaks.
   const contributions = eventsData
     .filter((event: GitHubEvent) => event.type === 'PushEvent')
     .map((event: GitHubEvent) => new Date(event.created_at).toDateString());
@@ -430,7 +426,6 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
   const uniqueDates = [...new Set(contributions)];
   const sortedDates = uniqueDates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
 
-  // Simple streak calculation
   let currentStreak = 0;
   let longestStreak = 0;
   let tempStreak = 0;
@@ -455,7 +450,6 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
       }
     }
 
-    // Check current streak
     if (currentDateStr === today || 
         Math.floor((new Date().getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24)) <= 1) {
       currentStreak = tempStreak + 1;
@@ -464,12 +458,12 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
 
   if (tempStreak > longestStreak) longestStreak = tempStreak;
 
-  // Get last activity date
+  // Determine last activity date.
   const lastActivity = eventsData.length > 0 && eventsData[0]?.created_at
-    ? eventsData[0].created_at 
+    ? eventsData[0].created_at
     : userData.created_at;
 
-  // Compile stats
+  // Return the compiled stats object.
   return {
     username: userData.login,
     followers: userData.followers,
@@ -498,18 +492,15 @@ const fetchGitHubStats = async (username: string): Promise<GitHubStats> => {
 };
 
 /**
- * GitHub Stats endpoint with query parameter
- * 
- * Usage:
- * GET /api/github/v2/stats?username=username&force=true
+ * GET handler to fetch and return a user's GitHub stats.
+ * Uses caching for performance.
  */
-githubRouter.get('/v2/stats', async (req: Request, res: Response) => {
+githubRouter.get('/v2/stats', async (req: Request, res: ExpressResponse) => {
   try {
     const { username, force } = req.query;
 
-    // Validate username parameter
     if (!username || typeof username !== 'string') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Username parameter required',
         usage: [
           'GET /api/github/v2/stats?username=username',
@@ -522,7 +513,7 @@ githubRouter.get('/v2/stats', async (req: Request, res: Response) => {
     const now = Date.now();
     const forceRefresh = force === 'true';
 
-    // Check cache if not forcing refresh
+    // Check for cached stats.
     if (!forceRefresh && cache[cacheKey]) {
       if (now - cache[cacheKey].lastUpdated < STATS_CACHE_DURATION) {
         console.log(`Cache hit for stats: ${username}`);
@@ -536,10 +527,9 @@ githubRouter.get('/v2/stats', async (req: Request, res: Response) => {
 
     console.log(`Fetching GitHub stats for: ${username}`);
 
-    // Fetch stats using helper function
     const stats = await fetchGitHubStats(username);
 
-    // Cache the stats
+    // Cache the new stats.
     cache[cacheKey] = {
       data: stats,
       lastUpdated: now
@@ -551,6 +541,7 @@ githubRouter.get('/v2/stats', async (req: Request, res: Response) => {
   } catch (error: unknown) {
     console.error('GitHub stats error:', error);
 
+    // Handle specific errors.
     if (error instanceof Error) {
       if (error.message.includes('not found')) {
         return res.status(404).json({
@@ -587,20 +578,16 @@ githubRouter.get('/v2/stats', async (req: Request, res: Response) => {
 });
 
 /**
- * GitHub Stats endpoint with path parameter
- * 
- * Usage:
- * GET /api/github/v2/stats/username
- * GET /api/github/v2/stats/username?force=true
+ * GET handler to fetch and return a user's GitHub stats, using a URL parameter.
+ * This route is an alternative to the query parameter route.
  */
-githubRouter.get('/v2/stats/:username', async (req: Request, res: Response) => {
+githubRouter.get('/v2/stats/:username', async (req: Request, res: ExpressResponse) => {
   try {
     const { username } = req.params;
     const { force } = req.query;
 
-    // Validate username parameter
     if (!username || typeof username !== 'string') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Username parameter required',
         usage: [
           'GET /api/github/v2/stats?username=username',
@@ -613,7 +600,7 @@ githubRouter.get('/v2/stats/:username', async (req: Request, res: Response) => {
     const now = Date.now();
     const forceRefresh = force === 'true';
 
-    // Check cache if not forcing refresh
+    // Check for cached stats.
     if (!forceRefresh && cache[cacheKey]) {
       if (now - cache[cacheKey].lastUpdated < STATS_CACHE_DURATION) {
         console.log(`Cache hit for stats: ${username}`);
@@ -627,10 +614,9 @@ githubRouter.get('/v2/stats/:username', async (req: Request, res: Response) => {
 
     console.log(`Fetching GitHub stats for: ${username}`);
 
-    // Fetch stats using helper function
     const stats = await fetchGitHubStats(username);
 
-    // Cache the stats
+    // Cache the new stats.
     cache[cacheKey] = {
       data: stats,
       lastUpdated: now
@@ -642,6 +628,7 @@ githubRouter.get('/v2/stats/:username', async (req: Request, res: Response) => {
   } catch (error: unknown) {
     console.error('GitHub stats error:', error);
 
+    // Handle specific errors.
     if (error instanceof Error) {
       if (error.message.includes('not found')) {
         return res.status(404).json({
