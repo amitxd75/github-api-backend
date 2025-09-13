@@ -233,7 +233,7 @@ Ensure your `netlify.toml` is configured:
   status = 200
 
 [build.environment]
-  NODE_VERSION = "18"
+  NODE_VERSION = "20"
 
 [[headers]]
   for = "/.netlify/functions/api/*"
@@ -457,16 +457,6 @@ export GITHUB_TOKEN=your_token_here
 export ALLOWED_ORIGINS=http://localhost:3000,https://yourdomain.com
 ```
 
-#### **"Network connectivity issue"**
-- Check your internet connection
-- Verify GitHub API is accessible: `curl https://api.github.com/users/octocat`
-- Check if you're behind a corporate firewall
-
-#### **"User not found"**
-- Verify the username exists on GitHub
-- Check if the user's profile is public
-- Ensure correct spelling of the username
-
 ### 📊 **Monitoring**
 
 #### **Check Server Health**
@@ -546,7 +536,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- 📧 **Email**: [your-email@example.com](mailto:your-email@example.com)
 - 🐛 **Issues**: [GitHub Issues](https://github.com/amitxd75/github-api-backend/issues)
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/amitxd75/github-api-backend/discussions)
 

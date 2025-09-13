@@ -122,6 +122,15 @@ export interface GitHubEvent {
   type: string;
   /** ISO date string when the event occurred */
   created_at: string;
+  /** Repository information where the event occurred */
+  repo?: {
+    /** Repository ID */
+    id: number;
+    /** Full repository name (e.g., "username/repo-name") */
+    name: string;
+    /** Repository URL */
+    url: string;
+  };
   /** Event-specific payload data */
   payload: {
     /** Commits associated with the event (for PushEvent) */
