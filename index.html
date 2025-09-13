@@ -110,33 +110,92 @@
   </style>
 </head>
 <body>
-  <h1>🌐 GitHub API Backend v2.0</h1>
-  <p>Test your <code>/v2/stats</code> and <code>?endpoint=</code> queries here:</p>
+  <h1>🚀 GitHub API Backend v2.0</h1>
+  <p>Test your GitHub API proxy and stats endpoints:</p>
 
   <form id="api-form">
-    <label for="endpoint">GitHub API Endpoint (e.g. <code>/users/octocat</code>):</label>
-    <input type="text" id="endpoint" value="/users/octocat" />
+    <label for="endpoint">GitHub API Endpoint:</label>
+    <input type="text" id="endpoint" value="/users/octocat" placeholder="/users/username or /repos/owner/repo" />
 
-    <label for="username">GitHub Username (for /stats):</label>
-    <input type="text" id="username" value="amitxd75" />
+    <label for="username">GitHub Username (for stats):</label>
+    <input type="text" id="username" value="amitxd75" placeholder="Enter GitHub username" />
 
-    <button type="submit">Fetch Both</button>
+    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+      <button type="submit" style="flex: 1;">🔍 Test Both</button>
+      <button type="button" onclick="testEndpoint()" style="flex: 1; background: #6366f1;">📡 Endpoint Only</button>
+      <button type="button" onclick="testStats()" style="flex: 1; background: #10b981;">📊 Stats Only</button>
+    </div>
   </form>
 
-  <h2>📦 Result</h2>
-  <div id="result">Waiting for request...</div>
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h2>📦 Results</h2>
+    <button onclick="clearResults()" style="padding: 0.5rem 1rem; font-size: 0.9rem; background: #6b7280;">Clear</button>
+  </div>
+  <div id="result">Ready to test! Enter a GitHub username and endpoint above.</div>
 
   <script>
-    document.getElementById('api-form').onsubmit = async (e) => {
-      e.preventDefault();
+    const resultDiv = document.getElementById('result');
 
-      const endpoint = document.getElementById('endpoint').value.trim();
-      const username = document.getElementById('username').value.trim();
-      const resultDiv = document.getElementById('result');
-
+    function setLoading() {
       resultDiv.textContent = "⏳ Loading...";
       resultDiv.className = "";
+    }
 
+    function setResult(content, isSuccess = true) {
+      resultDiv.textContent = content;
+      resultDiv.className = isSuccess ? 'success' : 'error';
+    }
+
+    function clearResults() {
+      resultDiv.textContent = "Ready to test! Enter a GitHub username and endpoint above.";
+      resultDiv.className = "";
+    }
+
+    async function testEndpoint() {
+      const endpoint = document.getElementById('endpoint').value.trim();
+      if (!endpoint) {
+        setResult("❌ Please enter an endpoint", false);
+        return;
+      }
+
+      setLoading();
+      try {
+        const res = await fetch(`/api/github/v2/?endpoint=${encodeURIComponent(endpoint)}`);
+        const data = await res.json();
+        setResult(`📡 Endpoint: ${endpoint}\n\n${JSON.stringify(data, null, 2)}`, res.ok);
+      } catch (err) {
+        setResult(`❌ Error: ${err.message}`, false);
+      }
+    }
+
+    async function testStats() {
+      const username = document.getElementById('username').value.trim();
+      if (!username) {
+        setResult("❌ Please enter a username", false);
+        return;
+      }
+
+      setLoading();
+      try {
+        const res = await fetch(`/api/github/v2/stats?username=${encodeURIComponent(username)}`);
+        const data = await res.json();
+        setResult(`📊 Stats for: ${username}\n\n${JSON.stringify(data, null, 2)}`, res.ok);
+      } catch (err) {
+        setResult(`❌ Error: ${err.message}`, false);
+      }
+    }
+
+    document.getElementById('api-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const endpoint = document.getElementById('endpoint').value.trim();
+      const username = document.getElementById('username').value.trim();
+
+      if (!endpoint || !username) {
+        setResult("❌ Please enter both endpoint and username", false);
+        return;
+      }
+
+      setLoading();
       try {
         const [proxyRes, statsRes] = await Promise.all([
           fetch(`/api/github/v2/?endpoint=${encodeURIComponent(endpoint)}`),
@@ -146,16 +205,12 @@
         const proxyData = await proxyRes.json();
         const statsData = await statsRes.json();
 
-        let output = `🔗 /v2/?endpoint=${endpoint}\n\n` +
-                     JSON.stringify(proxyData, null, 2) + `\n\n` +
-                     `📊 /v2/stats?username=${username}\n\n` +
-                     JSON.stringify(statsData, null, 2);
+        const output = `📡 Endpoint: ${endpoint}\n\n${JSON.stringify(proxyData, null, 2)}\n\n` +
+                      `📊 Stats for: ${username}\n\n${JSON.stringify(statsData, null, 2)}`;
 
-        resultDiv.textContent = output;
-        resultDiv.className = proxyRes.ok && statsRes.ok ? 'success' : 'error';
+        setResult(output, proxyRes.ok && statsRes.ok);
       } catch (err) {
-        resultDiv.textContent = "❌ Error: " + err.message;
-        resultDiv.className = 'error';
+        setResult(`❌ Error: ${err.message}`, false);
       }
     };
   </script>
