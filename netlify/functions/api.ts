@@ -20,11 +20,10 @@ import { errorHandler } from '../../src/middleware/errorHandler';
 import { requestLogger } from '../../src/middleware/requestLogger';
 
 /**
- * Global augmentation for warm function detection in serverless environments.
+ * Module-level flag for warm function detection in serverless environments.
+ * Initialized to false on cold start; set to true after the first request.
  */
-declare global {
-	let warmFunction: boolean | undefined;
-}
+let warmFunction: boolean = false;
 
 // Load environment variables
 dotenv.config();
@@ -84,6 +83,9 @@ app.use(cors({
  * Provides serverless-specific status including cold start detection.
  */
 app.get('/health', (req: Request, res: Response) => {
+	// Capture cold start state before marking the function as warm
+	const isColdStart = !warmFunction;
+
 	res.json({
 		status: 'OK',
 		timestamp: new Date().toISOString(),
@@ -95,7 +97,7 @@ app.get('/health', (req: Request, res: Response) => {
 			used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
 			total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024)
 		},
-		coldStart: !warmFunction
+		coldStart: isColdStart
 	});
 
 	// Mark function as warm for subsequent requests
