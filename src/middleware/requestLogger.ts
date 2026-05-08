@@ -1,12 +1,6 @@
 /**
  * Request logging middleware for monitoring and debugging.
  * Logs incoming requests and their completion status.
- *
- * Features:
- * - Logs request details (method, URL, IP, user agent)
- * - Tracks response time and status codes
- * - Provides insights into API usage patterns
- * - Helps with debugging and performance monitoring
  */
 import { Request, Response, NextFunction } from 'express';
 
