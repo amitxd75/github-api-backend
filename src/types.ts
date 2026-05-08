@@ -1,151 +1,279 @@
 /**
- * Type definitions for the GitHub API Backend.
- * These interfaces define the structure of data used throughout the application.
+ * GitHub API Backend - Data Models
+ * 
+ * Defines the core interfaces and types used for data transfer and internal 
+ * state management across the application.
+ * 
+ * Domain Categories:
+ * - Cache: Storage structures for the LRU system.
+ * - Stats: Aggregated data models for user-facing statistics.
+ * - REST API: Type definitions for GitHub's REST API responses.
+ * - GraphQL: Schemas for the high-efficiency GraphQL engine.
  */
 
+// ─── Cache ────────────────────────────────────────────────────────────────────
+
 /**
- * Cache entry structure for in-memory caching system.
- * Used to store API responses with timestamp for TTL management.
+ * Represents a generic entry stored in the cache.
  */
-export interface CacheEntry {
-  /** The cached data (can be any JSON-serializable object) */
-  data: unknown;
-  /** Unix timestamp when this entry was last updated */
-  lastUpdated: number;
+export interface CacheEntry<T = unknown> {
+	/** The actual data being cached */
+	data: T;
+	/** Timestamp when the entry was last updated */
+	lastUpdated: number;
+	/** Number of times this entry has been accessed */
+	hits: number;
 }
 
+// ─── Stats ────────────────────────────────────────────────────────────────────
+
 /**
- * Comprehensive GitHub user statistics interface.
- * Aggregates data from multiple GitHub API endpoints to provide
- * a complete picture of a user's GitHub activity and contributions.
+ * Comprehensive aggregated statistics for a GitHub user.
+ * This is the primary data model returned by the /stats endpoint.
  */
 export interface GitHubStats {
-  // Basic user information
-  /** GitHub username */
-  username: string;
-  /** Number of followers */
-  followers: number;
-  /** Number of users being followed */
-  following: number;
-  /** Number of public repositories */
-  publicRepos: number;
-  /** Number of public gists */
-  publicGists: number;
-  /** ISO date string when account was created */
-  accountCreated: string;
-  /** ISO date string of last activity */
-  lastActivity: string;
-  
-  // Repository statistics
-  /** Total number of repositories (including forks) */
-  totalRepos: number;
-  /** Total stars received across all original repositories */
-  totalStars: number;
-  /** Total forks of user's original repositories */
-  totalForks: number;
-  /** Number of repositories that are forks of other projects */
-  contributedTo: number;
-  
-  // Activity statistics (from recent events)
-  /** Total commits from recent activity (limited by GitHub events API) */
-  totalCommits: number;
-  /** Total pull requests from recent activity */
-  totalPRs: number;
-  /** Total issues from recent activity */
-  totalIssues: number;
-  /** Current contribution streak in days */
-  currentStreak: number;
-  /** Longest contribution streak in days */
-  longestStreak: number;
-  
-  // Technical profile
-  /** Top programming languages by percentage of code */
-  topLanguages: Record<string, number>;
-  /** Number of repositories with activity in the last 30 days */
-  recentRepoActivity: number;
-  
-  // Metadata
-  /** ISO date string when these stats were last calculated */
-  lastUpdated: string;
-  /** Age of cached data in seconds (only present for cached responses) */
-  cacheAge?: number;
+	/** GitHub login/username */
+	username: string;
+	/** Display name of the user */
+	name: string | null;
+	/** URL to the user's avatar image */
+	avatarUrl: string | null;
+	/** User's biography */
+	bio: string | null;
+	/** User's location (city, country, etc.) */
+	location: string | null;
+	/** User's company affiliation */
+	company: string | null;
+	/** URL to the user's personal website */
+	websiteUrl: string | null;
+	/** User's Twitter handle */
+	twitterUsername: string | null;
+
+	/** Total number of followers */
+	followers: number;
+	/** Total number of users being followed */
+	following: number;
+	/** Total number of public repositories owned */
+	publicRepos: number;
+	/** Total number of public gists */
+	publicGists: number;
+	/** ISO timestamp of account creation */
+	accountCreated: string;
+	/** ISO timestamp of the user's most recent public activity */
+	lastActivity: string;
+
+	/** Total repository count (including mirrors if applicable) */
+	totalRepos: number;
+	/** Sum of stars across all owned repositories */
+	totalStars: number;
+	/** Sum of forks across all owned repositories */
+	totalForks: number;
+	/** Number of repositories the user has contributed to (forks) */
+	contributedTo: number;
+
+	/** Total commits in the last year */
+	totalCommits: number;
+	/** Total pull requests in the last year */
+	totalPRs: number;
+	/** Total issues opened in the last year */
+	totalIssues: number;
+	/** Current consecutive days with contributions */
+	currentStreak: number;
+	/** All-time highest consecutive days with contributions */
+	longestStreak: number;
+
+	/** Mapping of language names to their percentage usage across repos */
+	topLanguages: Record<string, number>;
+	/** Number of repositories with activity in the last 30 days */
+	recentRepoActivity: number;
+
+	/** ISO timestamp of when this data was fetched from GitHub */
+	lastUpdated: string;
+	/** Age of the cached data in seconds (if served from cache) */
+	cacheAge?: number;
 }
 
+// ─── REST API shapes ──────────────────────────────────────────────────────────
+
 /**
- * GitHub User API response interface.
- * Represents the structure returned by GitHub's /users/{username} endpoint.
+ * Partial representation of a GitHub User from the REST API.
  */
 export interface GitHubUser {
-  /** GitHub username */
-  login: string;
-  /** Number of followers */
-  followers: number;
-  /** Number of users being followed */
-  following: number;
-  /** Number of public repositories */
-  public_repos: number;
-  /** Number of public gists */
-  public_gists: number;
-  /** ISO date string when account was created */
-  created_at: string;
+	/** GitHub login/username */
+	login: string;
+	/** Display name */
+	name: string | null;
+	/** Avatar image URL */
+	avatar_url: string | null;
+	/** Biography */
+	bio: string | null;
+	/** Location */
+	location: string | null;
+	/** Company */
+	company: string | null;
+	/** Blog or website URL */
+	blog: string | null;
+	/** Twitter handle */
+	twitter_username: string | null;
+	/** Follower count */
+	followers: number;
+	/** Following count */
+	following: number;
+	/** Public repository count */
+	public_repos: number;
+	/** Public gist count */
+	public_gists: number;
+	/** ISO creation timestamp */
+	created_at: string;
 }
 
 /**
- * GitHub Repository API response interface.
- * Represents the structure returned by GitHub's repository endpoints.
+ * Representation of a GitHub Repository from the REST API.
  */
 export interface GitHubRepo {
-  /** Repository name */
-  name: string;
-  /** Full repository name including owner (e.g., "owner/repo") */
-  full_name: string;
-  /** Number of stars the repository has received */
-  stargazers_count: number;
-  /** Number of times the repository has been forked */
-  forks_count: number;
-  /** Primary programming language (null if not detected) */
-  language: string | null;
-  /** Repository size in kilobytes */
-  size: number;
-  /** ISO date string of last push to the repository */
-  pushed_at: string;
-  /** Whether this repository is a fork of another repository */
-  fork: boolean;
+	/** Repository name */
+	name: string;
+	/** Full repository name (owner/repo) */
+	full_name: string;
+	/** Star count */
+	stargazers_count: number;
+	/** Fork count */
+	forks_count: number;
+	/** Primary language */
+	language: string | null;
+	/** Size in KB */
+	size: number;
+	/** ISO timestamp of last push */
+	pushed_at: string;
+	/** Whether the repo is a fork */
+	fork: boolean;
 }
 
 /**
- * GitHub Event API response interface.
- * Represents the structure returned by GitHub's /users/{username}/events endpoint.
+ * Representation of a GitHub Event from the Events API.
  */
 export interface GitHubEvent {
-  /** Type of event (e.g., "PushEvent", "PullRequestEvent", "IssuesEvent") */
-  type: string;
-  /** ISO date string when the event occurred */
-  created_at: string;
-  /** Repository information where the event occurred */
-  repo?: {
-    /** Repository ID */
-    id: number;
-    /** Full repository name (e.g., "username/repo-name") */
-    name: string;
-    /** Repository URL */
-    url: string;
-  };
-  /** Event-specific payload data */
-  payload: {
-    /** Commits associated with the event (for PushEvent) */
-    commits?: Array<{
-      /** Commit SHA hash */
-      sha: string;
-      /** Commit message */
-      message: string;
-      /** Commit author information */
-      author: {
-        /** Author name */
-        name: string;
-        /** Author email */
-        email: string;
-      };
-    }>;
-  };
+	/** Event type (e.g., PushEvent, PullRequestEvent) */
+	type: string;
+	/** ISO timestamp of event creation */
+	created_at: string;
+	/** Repository where the event occurred */
+	repo?: { id: number; name: string; url: string };
+	/** Event-specific data */
+	payload: {
+		/** List of commits (for PushEvents) */
+		commits?: Array<{
+			sha: string;
+			message: string;
+			author: { name: string; email: string };
+		}>;
+	};
 }
+
+/**
+ * GitHub API rate limit status.
+ */
+export interface RateLimit {
+	/** Remaining requests in current window */
+	remaining: string | null;
+	/** Unix timestamp when the window resets */
+	reset: string | null;
+	/** Total request limit per window */
+	limit: string | null;
+}
+
+// ─── GraphQL shapes ───────────────────────────────────────────────────────────
+
+/**
+ * Represents a single day of contributions in the GraphQL contribution calendar.
+ */
+export interface GraphQLContribDay {
+	/** ISO date string (YYYY-MM-DD) */
+	date: string;
+	/** Number of contributions on this day */
+	contributionCount: number;
+}
+
+/**
+ * Represents a week of contributions in the GraphQL contribution calendar.
+ */
+export interface GraphQLContribWeek {
+	/** List of contribution days in the week */
+	contributionDays: GraphQLContribDay[];
+}
+
+/**
+ * Raw response structure from the GitHub GraphQL API for statistics.
+ */
+export interface GraphQLResponse {
+	/** The data payload from GitHub */
+	data: {
+		/** User object containing all requested fields */
+		user: {
+			/** Display name */
+			name: string | null;
+			/** Avatar image URL */
+			avatarUrl: string;
+			/** Biography */
+			bio: string | null;
+			/** Location */
+			location: string | null;
+			/** Company affiliation */
+			company: string | null;
+			/** Personal website URL */
+			websiteUrl: string | null;
+			/** Twitter handle */
+			twitterUsername: string | null;
+			/** Follower metadata */
+			followers: { totalCount: number };
+			/** Following metadata */
+			following: { totalCount: number };
+			/** Repository metadata and nodes */
+			repositories: {
+				/** Total repository count */
+				totalCount: number;
+				/** Paginated repository list */
+				nodes: Array<{
+					/** Repository name */
+					name: string;
+					/** Star count */
+					stargazerCount: number;
+					/** Fork count */
+					forkCount: number;
+					/** Whether the repo is a fork */
+					isFork: boolean;
+					/** Primary language object */
+					primaryLanguage: { name: string } | null;
+					/** Detailed language breakdown */
+					languages: {
+						/** List of language edges with sizes */
+						edges: Array<{ size: number; node: { name: string } }>;
+					};
+					/** ISO push timestamp */
+					pushedAt: string | null;
+				}>;
+			};
+			/** Aggregated contribution collections */
+			contributionsCollection: {
+				/** Total commits in the queried period */
+				totalCommitContributions: number;
+				/** Total pull requests in the queried period */
+				totalPullRequestContributions: number;
+				/** Total issues in the queried period */
+				totalIssueContributions: number;
+				/** The contribution calendar (for streak computation) */
+				contributionCalendar: {
+					/** List of contribution weeks */
+					weeks: GraphQLContribWeek[];
+				};
+			};
+			/** ISO account creation timestamp */
+			createdAt: string;
+		} | null;
+	};
+	/** List of errors returned by the GraphQL server */
+	errors?: Array<{ message: string }>;
+}
+
+/** Helper type for a non-null GraphQL User object */
+export type GitHubGQLUser = NonNullable<GraphQLResponse['data']['user']>;

@@ -1,183 +1,205 @@
-# 🚀 GitHub API Backend v2.0
+# 🚀 GitHub API Backend
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![Express](https://img.shields.io/badge/Express-4.18+-lightgrey.svg)](https://expressjs.com/)
 
-> **A powerful, intelligent GitHub API proxy and statistics aggregator with smart caching, robust error handling, and comprehensive user analytics.**
+> **A fast, accurate GitHub API proxy and stats aggregator. Features a GraphQL-powered statistics engine, high-performance LRU caching with TTL, and fully parallel data fetching.**
 
-Perfect for portfolio websites, GitHub dashboards, and applications that need reliable GitHub data with enhanced performance and detailed user insights.
+---
+
+## ✨ Core Capabilities
+
+- **High-Efficiency Stats** — Aggregates profile, repository, and contribution data in a single GraphQL round-trip.
+- **Intelligent Proxy** — Secure access to any public GitHub REST endpoint with configurable caching.
+- **O(1) LRU Cache** — Doubly-linked list + Map implementation with per-entry TTL and hit-rate tracking.
+- **Accurate Metrics** — Computes contribution streaks from the full 365-day contribution calendar.
+- **Hardened Reliability** — Integrated exponential-backoff retry logic and comprehensive error handling.
 
 ---
 
 ## ✨ Features
 
-### 🎯 **Core Functionality**
-- **GitHub API Proxy** - Access any GitHub endpoint with intelligent caching
-- **Comprehensive Stats** - Detailed user analytics and contribution insights
-- **Smart Caching** - Configurable TTL with automatic cleanup and size management
-- **Retry Logic** - Robust error handling with exponential backoff
-- **Rate Limit Aware** - Intelligent handling of GitHub's API limits
+### 🎯 Core
+- **GitHub GraphQL stats** — profile, repos, languages, commits, PRs, issues, and streaks in one query
+- **GitHub REST proxy** — access any public GitHub endpoint with optional caching
+- **Smart LRU cache** — O(1) get/set, per-entry TTL, hit-rate tracking, automatic eviction
+- **Accurate streaks** — computed from the full contribution calendar (same data as your GitHub profile)
+- **Retry logic** — exponential backoff on 5xx and transient network errors
 
-### 🛡️ **Security & Performance**
-- **Security Headers** - Helmet.js integration for production security
-- **CORS Configuration** - Flexible cross-origin resource sharing
-- **Request Logging** - Detailed monitoring and debugging capabilities
-- **Error Handling** - Comprehensive error responses with helpful suggestions
-- **Memory Management** - Automatic cache cleanup to prevent memory leaks
+### 🛡️ Security & Performance
+- Helmet.js security headers
+- Configurable CORS
+- Rate-limit headers forwarded to the client
+- Username validation before hitting GitHub
+- Parallel REST fetches with `Promise.allSettled` (partial failure doesn't kill the whole request)
 
-### 🚀 **Deployment Ready**
-- **Dual Deployment** - Works locally and on Netlify Functions
-- **Environment Aware** - Different configurations for dev/production
-- **Health Checks** - Built-in monitoring endpoints
-- **Graceful Shutdown** - Proper cleanup on termination signals
+### 🚀 Deployment
+- Local Express server
+- Netlify Functions compatible
+- Graceful shutdown (SIGTERM/SIGINT)
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Client App    │───▶│  GitHub API      │───▶│   GitHub API    │
-│  (Portfolio)    │    │    Backend       │    │   (github.com)  │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌──────────────┐
-                       │  Smart Cache │
-                       │   (In-Memory) │
-                       └──────────────┘
+Client App
+    │
+    ▼
+Express Server (server.ts)
+    │
+    ├── /api/github/v2/stats  ──►  GitHub GraphQL API  (1 request)
+    │         │                          ↓
+    │         └──────────────────  LRU Stats Cache (6h TTL)
+    │
+    └── /api/github/v2        ──►  GitHub REST API
+              │                          ↓
+              └──────────────────  LRU General Cache (14d TTL)
 ```
 
-### 🔧 **Tech Stack**
-- **Runtime**: Node.js 18+
-- **Framework**: Express.js with TypeScript
-- **Security**: Helmet.js, CORS
-- **Deployment**: Netlify Functions + Local Server
-- **Caching**: In-memory with TTL and size limits
+**File structure:**
+```
+src/
+├── server.ts                  # Express app + startup
+├── routes/
+│   └── github.ts              # All GitHub routes + GraphQL logic
+├── cache/
+│   └── lruCache.ts            # LRU cache implementation
+└── middleware/
+    ├── requestLogger.ts
+    └── errorHandler.ts
+types.ts                       # Shared TypeScript interfaces
+```
 
 ---
 
 ## 🚀 Quick Start
 
-### 📋 Prerequisites
-- Node.js 18 or higher
-- npm or yarn
-- GitHub Personal Access Token (optional, for higher rate limits)
+### Prerequisites
+- Node.js 20+
+- GitHub Personal Access Token (**required** for GraphQL — see note below)
 
-### 🛠️ Installation
+> **Note:** The GraphQL API (`api.github.com/graphql`) requires authentication. Without a token the stats endpoint will return 401. The REST proxy endpoint works unauthenticated but is limited to 60 req/hr.
+
+### Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/amitxd75/github-api-backend.git
 cd github-api-backend
-
-# Install dependencies
 npm install
-
-# Create environment file (optional)
 cp .env.example .env
-# Edit .env with your GitHub token and allowed origins
+# Add your GITHUB_TOKEN to .env
 ```
 
-### 🔑 Environment Configuration
-
-Create a `.env` file in the root directory:
+### Environment
 
 ```env
-# GitHub Personal Access Token (optional but recommended)
-# Get one at: https://github.com/settings/tokens
-GITHUB_TOKEN=your_github_token_here
+# Required for /stats (GraphQL needs auth)
+GITHUB_TOKEN=ghp_your_token_here
 
-# Allowed CORS origins (comma-separated)
+# Comma-separated allowed CORS origins
 ALLOWED_ORIGINS=http://localhost:3000,https://yourdomain.com
 
-# Environment
 NODE_ENV=development
+PORT=3001
 ```
 
-### 🏃‍♂️ Running Locally
+Get a token at [github.com/settings/tokens](https://github.com/settings/tokens) — only `read:user` and `public_repo` scopes are needed.
+
+### Run
 
 ```bash
-# Development mode with hot reload
-npm run dev
-
-# Production build and start
-npm run build
-npm start
-
-# Clean build artifacts
-npm run clean
+npm run dev     # development (hot reload)
+npm run build   # compile TypeScript
+npm start       # production
 ```
-
-The server will start on `http://localhost:3001`
 
 ---
 
-## 📡 API Documentation
+## 📡 API Reference
 
-### 🌐 Base URLs
-- **Local**: `http://localhost:3001`
-- **Netlify**: `https://your-site.netlify.app/.netlify/functions/api`
+All endpoints are **identical to v2** — no client changes required.
 
-### 🔗 Endpoints
+### Base URL
+- Local: `http://localhost:3001`
+- Netlify: `https://your-site.netlify.app/.netlify/functions/api`
 
-#### 📊 **Health Check**
-```http
-GET /health
-```
-Returns server status, uptime, and memory usage.
+---
 
-#### 📖 **API Documentation**
-```http
-GET /api
-```
-Interactive API documentation with examples.
+### `GET /health`
 
-#### 🐙 **GitHub API Proxy**
-```http
-GET /api/github/v2/?endpoint=<github-path>&cache=<true|false>
-```
+Server status, uptime, memory usage, token presence.
 
-**Parameters:**
-- `endpoint` (required): GitHub API path (e.g., `/users/octocat`)
-- `cache` (optional): Enable 14-day caching (`true`/`false`)
+---
+
+### `GET /api`
+
+API documentation and available endpoints.
+
+---
+
+### `GET /api/github/v2?endpoint=<path>&cache=<true|false>`
+
+Proxy any GitHub REST API endpoint.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `endpoint` | ✅ | GitHub API path, must start with `/` |
+| `cache` | ❌ | Set to `true` to cache for 14 days |
 
 **Examples:**
 ```bash
-# Get user profile
-curl "http://localhost:3001/api/github/v2/?endpoint=/users/octocat"
+# User profile
+curl "http://localhost:3001/api/github/v2?endpoint=/users/octocat"
 
-# Get user repositories with caching
-curl "http://localhost:3001/api/github/v2/?endpoint=/users/octocat/repos&cache=true"
-
-# Get repository details
-curl "http://localhost:3001/api/github/v2/?endpoint=/repos/octocat/Hello-World"
+# Repos with caching
+curl "http://localhost:3001/api/github/v2?endpoint=/users/octocat/repos&cache=true"
 ```
 
-#### 📈 **GitHub User Statistics**
-```http
-GET /api/github/v2/stats?username=<username>&force=<true|false>
-GET /api/github/v2/stats/<username>?force=<true|false>
-```
+---
 
-**Parameters:**
-- `username` (required): GitHub username
-- `force` (optional): Bypass cache and fetch fresh data
+### `GET /api/github/v2/stats?username=<username>&force=<true|false>`
+### `GET /api/github/v2/stats/:username`
 
-**Response Example:**
+Fetch comprehensive stats for a GitHub user. Powered by GraphQL — one request to GitHub, cached for 6 hours.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `username` | ✅ | GitHub username |
+| `force` | ❌ | `true` bypasses cache |
+
+**Response:**
 ```json
 {
   "username": "amitxd75",
+  "name": "Amit",
+  "avatarUrl": "https://avatars.githubusercontent.com/...",
+  "bio": "...",
+  "location": "...",
+  "company": null,
+  "websiteUrl": "https://...",
+  "twitterUsername": null,
+
   "followers": 42,
   "following": 15,
   "publicRepos": 25,
+  "publicGists": 3,
+  "accountCreated": "2020-01-01T00:00:00Z",
+  "lastActivity": "2024-06-01T12:00:00Z",
+
+  "totalRepos": 25,
   "totalStars": 150,
   "totalForks": 30,
-  "totalCommits": 500,
-  "currentStreak": 5,
-  "longestStreak": 15,
+  "contributedTo": 5,
+
+  "totalCommits": 1240,
+  "totalPRs": 48,
+  "totalIssues": 22,
+  "currentStreak": 7,
+  "longestStreak": 30,
+
   "topLanguages": {
     "TypeScript": 45,
     "JavaScript": 30,
@@ -185,35 +207,143 @@ GET /api/github/v2/stats/<username>?force=<true|false>
     "Go": 10
   },
   "recentRepoActivity": 3,
-  "lastUpdated": "2024-01-15T10:30:00.000Z"
+  "lastUpdated": "2024-06-01T12:00:00Z",
+
+  "cacheAge": 3600
 }
 ```
 
-#### 🗂️ **Cache Management**
+> `cacheAge` is only present on cached responses (seconds since last fetch).
+> `totalCommits`, `totalPRs`, `totalIssues` reflect the current contribution year (resets Jan 1).
 
-**View Cache Status:**
-```http
-GET /api/github/v2/cache/status
+---
+
+### `GET /api/github/v2/cache/status`
+
+Cache health and hit-rate metrics.
+
+```json
+{
+  "general": {
+    "size": 12,
+    "capacity": 1000,
+    "hits": 340,
+    "misses": 22,
+    "evictions": 0,
+    "hitRate": "93.9%",
+    "ttl": "14 days"
+  },
+  "stats": {
+    "size": 3,
+    "capacity": 200,
+    "hits": 87,
+    "misses": 3,
+    "evictions": 0,
+    "hitRate": "96.7%",
+    "ttl": "6 hours",
+    "keys": ["stats_amitxd75"]
+  }
+}
 ```
 
-**Clear All Cache:**
-```http
-DELETE /api/github/v2/cache
+### `DELETE /api/github/v2/cache`
+
+Clear all cache entries.
+
+### `DELETE /api/github/v2/cache/:key`
+
+Clear a specific entry (e.g. `DELETE /api/github/v2/cache/amitxd75` or by endpoint path).
+
+---
+
+## 💻 Usage Examples
+
+### JavaScript / React
+
+```js
+// Fetch comprehensive statistics
+const res = await fetch('/api/github/v2/stats?username=amitxd75');
+const stats = await res.json();
+
+console.log(stats.totalCommits);   // now accurate (full year via GraphQL)
+console.log(stats.currentStreak);  // now accurate (365-day calendar)
+console.log(stats.avatarUrl);      // new field available
+console.log(stats.name);           // new field available
 ```
 
-**Clear Specific Cache Entry:**
-```http
-DELETE /api/github/v2/cache/<endpoint-or-key>
+### React Hook
+
+```jsx
+import { useState, useEffect } from 'react';
+
+function useGitHubStats(username) {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!username) return;
+    setLoading(true);
+    fetch(`/api/github/v2/stats?username=${username}`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(data => { setStats(data); setLoading(false); })
+      .catch(err => { setError(err.message); setLoading(false); });
+  }, [username]);
+
+  return { stats, loading, error };
+}
+
+function GitHubProfile({ username }) {
+  const { stats, loading, error } = useGitHubStats(username);
+  if (loading) return <div>Loading...</div>;
+  if (error)   return <div>Error: {error}</div>;
+  return (
+    <div>
+      <img src={stats.avatarUrl} alt={stats.name} />
+      <h2>{stats.name ?? stats.username}</h2>
+      <p>⭐ {stats.totalStars} stars · 🔥 {stats.currentStreak} day streak</p>
+    </div>
+  );
+}
 ```
+
+### Python
+
+```python
+import requests
+
+def get_github_stats(username, base_url="http://localhost:3001"):
+    r = requests.get(f"{base_url}/api/github/v2/stats", params={"username": username})
+    r.raise_for_status()
+    return r.json()
+
+stats = get_github_stats("amitxd75")
+print(f"{stats['totalCommits']} commits · {stats['currentStreak']} day streak")
+```
+
+---
+
+## ⚙️ Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GITHUB_TOKEN` | **Yes for /stats** | — | GitHub PAT — needs `read:user`, `public_repo` |
+| `NODE_ENV` | No | `development` | `development` or `production` |
+| `ALLOWED_ORIGINS` | No | `http://localhost:3000` | Comma-separated CORS origins |
+| `PORT` | No | `3001` | Local server port |
+
+### Cache defaults
+
+| Cache | TTL | Capacity |
+|-------|-----|----------|
+| General (REST proxy) | 14 days | 1,000 entries |
+| Stats (GraphQL) | 6 hours | 200 entries |
 
 ---
 
 ## 🌐 Netlify Deployment
 
-### 📝 **Step 1: Prepare for Deployment**
-
-Ensure your `netlify.toml` is configured:
-
+`netlify.toml`:
 ```toml
 [build]
   functions = "netlify/functions"
@@ -233,317 +363,58 @@ Ensure your `netlify.toml` is configured:
   status = 200
 
 [build.environment]
-  NODE_VERSION = "20"
-
-[[headers]]
-  for = "/.netlify/functions/api/*"
-  [headers.values]
-    Access-Control-Allow-Origin = "*"
-    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
-    Access-Control-Allow-Headers = "Content-Type, Authorization"
+  NODE_VERSION = "22"
 ```
 
-### 🚀 **Step 2: Deploy to Netlify**
-
-#### **Option A: Netlify UI**
-1. Connect your GitHub repository
-2. Set build command: `npm run build`
-3. Set publish directory: `public` (or leave empty)
-4. Add environment variables:
-   ```
-   GITHUB_TOKEN=your_token_here
-   NODE_ENV=production
-   ALLOWED_ORIGINS=https://yourdomain.com,http://localhost:3000
-   ```
-
-#### **Option B: Netlify CLI**
-```bash
-# Install Netlify CLI
-npm install -g netlify-cli
-
-# Login and initialize
-netlify login
-netlify init
-
-# Set environment variables
-netlify env:set GITHUB_TOKEN your_token_here
-netlify env:set NODE_ENV production
-netlify env:set ALLOWED_ORIGINS "https://yourdomain.com"
-
-# Deploy
-netlify deploy --prod
+Environment variables to set in Netlify UI:
+```
+GITHUB_TOKEN=ghp_...
+NODE_ENV=production
+ALLOWED_ORIGINS=https://yourdomain.com
 ```
 
-### 🔗 **Step 3: Test Your Deployment**
-
-```bash
-# Health check
-curl https://your-site.netlify.app/.netlify/functions/api/health
-
-# API documentation
-curl https://your-site.netlify.app/.netlify/functions/api/api
-
-# GitHub stats
-curl "https://your-site.netlify.app/.netlify/functions/api/api/github/v2/stats?username=amitxd75"
-```
-
----
-
-## 💻 Usage Examples
-
-### 🐍 **Python**
-```python
-import requests
-
-class GitHubAPI:
-    def __init__(self, base_url="http://localhost:3001"):
-        self.base_url = base_url
-    
-    def get_user_stats(self, username, force=False):
-        """Get comprehensive GitHub user statistics."""
-        response = requests.get(
-            f"{self.base_url}/api/github/v2/stats",
-            params={"username": username, "force": str(force).lower()}
-        )
-        response.raise_for_status()
-        return response.json()
-    
-    def proxy_github_api(self, endpoint, cache=False):
-        """Proxy any GitHub API endpoint."""
-        response = requests.get(
-            f"{self.base_url}/api/github/v2/",
-            params={"endpoint": endpoint, "cache": str(cache).lower()}
-        )
-        response.raise_for_status()
-        return response.json()
-
-# Usage
-api = GitHubAPI()
-stats = api.get_user_stats("amitxd75")
-print(f"Total stars: {stats['totalStars']}")
-
-repos = api.proxy_github_api("/users/amitxd75/repos", cache=True)
-print(f"Repository count: {len(repos)}")
-```
-
-### 🟨 **JavaScript/Node.js**
-```javascript
-class GitHubAPI {
-  constructor(baseUrl = 'http://localhost:3001') {
-    this.baseUrl = baseUrl;
-  }
-
-  async getUserStats(username, force = false) {
-    const response = await fetch(
-      `${this.baseUrl}/api/github/v2/stats?username=${username}&force=${force}`
-    );
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  }
-
-  async proxyGitHubAPI(endpoint, cache = false) {
-    const response = await fetch(
-      `${this.baseUrl}/api/github/v2/?endpoint=${encodeURIComponent(endpoint)}&cache=${cache}`
-    );
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  }
-}
-
-// Usage
-const api = new GitHubAPI();
-const stats = await api.getUserStats('amitxd75');
-console.log(`Total stars: ${stats.totalStars}`);
-```
-
-### ⚛️ **React Hook**
-```jsx
-import { useState, useEffect } from 'react';
-
-function useGitHubStats(username) {
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    if (!username) return;
-
-    const fetchStats = async () => {
-      try {
-        setLoading(true);
-        const response = await fetch(
-          `http://localhost:3001/api/github/v2/stats?username=${username}`
-        );
-        if (!response.ok) throw new Error('Failed to fetch stats');
-        const data = await response.json();
-        setStats(data);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchStats();
-  }, [username]);
-
-  return { stats, loading, error };
-}
-
-// Usage in component
-function GitHubProfile({ username }) {
-  const { stats, loading, error } = useGitHubStats(username);
-
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div>Error: {error}</div>;
-  if (!stats) return null;
-
-  return (
-    <div>
-      <h2>{stats.username}</h2>
-      <p>⭐ {stats.totalStars} stars</p>
-      <p>🔥 {stats.currentStreak} day streak</p>
-    </div>
-  );
-}
-```
-
----
-
-## ⚙️ Configuration
-
-### 🔧 **Environment Variables**
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GITHUB_TOKEN` | No | - | GitHub Personal Access Token for higher rate limits (5000 vs 60 req/hr) |
-| `NODE_ENV` | No | `development` | Environment mode (`development` or `production`) |
-| `ALLOWED_ORIGINS` | No | `http://localhost:3000` | Comma-separated list of allowed CORS origins |
-| `PORT` | No | `3001` | Port for local server (ignored in Netlify) |
-
-### 📊 **Cache Configuration**
-
-The caching system is automatically configured with sensible defaults:
-
-- **General API endpoints**: 14 days TTL
-- **User statistics**: 6 hours TTL
-- **Maximum entries**: 1000 cached items
-- **Maximum size**: 50MB total cache size
-- **Cleanup strategy**: LRU (Least Recently Used)
-
-### 🔄 **Rate Limiting**
-
-- **Without token**: 60 requests per hour
-- **With GitHub token**: 5000 requests per hour
-- **Automatic retry**: Exponential backoff for failed requests
-- **Rate limit headers**: Included in responses when available
+> **Heads up on serverless caching:** Netlify Functions are stateless — the LRU cache resets on each cold start. For production with high traffic, consider replacing the in-memory cache with Redis (Upstash has a generous free tier). For a portfolio/low-traffic site the current setup is fine.
 
 ---
 
 ## 🐛 Troubleshooting
 
-### ❌ **Common Issues**
+### `401` on `/stats`
+GraphQL requires authentication. Add `GITHUB_TOKEN` to your `.env`.
 
-#### **"GitHub API rate limit exceeded"**
-```bash
-# Solution: Add a GitHub token to your environment
-export GITHUB_TOKEN=your_token_here
-# Or add it to your .env file
-```
+### `429` on REST proxy
+Rate limit hit (60/hr without token, 5000/hr with). Add `GITHUB_TOKEN`.
 
-#### **"CORS error in browser"**
-```bash
-# Solution: Add your domain to ALLOWED_ORIGINS
-export ALLOWED_ORIGINS=http://localhost:3000,https://yourdomain.com
-```
+### `CORS error` in browser
+Add your domain to `ALLOWED_ORIGINS`.
 
-### 📊 **Monitoring**
-
-#### **Check Server Health**
-```bash
-curl http://localhost:3001/health
-```
-
-#### **Monitor Cache Usage**
-```bash
-curl http://localhost:3001/api/github/v2/cache/status
-```
-
-#### **View Logs**
-```bash
-# Local development
-npm run dev
-
-# Production (check your deployment platform's logs)
-netlify logs
-```
+### Streak shows 0
+Your token may lack `read:user` scope, or the account has no public contributions this year.
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Here's how to get started:
-
-### 🔧 **Development Setup**
 ```bash
-# Fork and clone the repository
-git clone https://github.com/yourusername/github-api-backend.git
-cd github-api-backend
-
-# Install dependencies
+git clone https://github.com/amitxd75/github-api-backend.git
 npm install
-
-# Start development server
 npm run dev
-
-# Run type checking
-npm run build
-
-# Run linting
-npm run lint
-npm run lint:fix
 ```
 
-### 📝 **Contribution Guidelines**
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
-
-### 🐛 **Reporting Issues**
-- Use the [GitHub Issues](https://github.com/amitxd75/github-api-backend/issues) page
-- Include detailed reproduction steps
-- Provide environment information (Node.js version, OS, etc.)
-- Include relevant error messages and logs
+1. Fork → feature branch → PR
+2. Run `npm run build` to check types before submitting
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **GitHub API** - For providing comprehensive developer data
-- **Express.js** - For the robust web framework
-- **Netlify** - For excellent serverless function hosting
-- **TypeScript** - For type safety and developer experience
-
----
-
-## 📞 Support
-
-- 🐛 **Issues**: [GitHub Issues](https://github.com/amitxd75/github-api-backend/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/amitxd75/github-api-backend/discussions)
+MIT — see [LICENSE](LICENSE).
 
 ---
 
 <div align="center">
 
-**⭐ Star this repository if it helped you!**
+**⭐ Star this repo if it helped you!**
 
 Made with ❤️ by [amitxd75](https://github.com/amitxd75)
 
