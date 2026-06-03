@@ -352,7 +352,7 @@ function computeGitHubStats(
 	const weights: Record<string, number> = Object.fromEntries(
 		weightsRaw.split(',').filter(Boolean).map(s => {
 			const [lang, weight] = s.split(':');
-			return [lang, parseFloat(weight) || 1.0];
+			return [lang, parseFloat(weight || '1.0') || 1.0];
 		})
 	);
 
@@ -687,7 +687,7 @@ githubRouter.get('/v2/cache/status', (_req, res) => {
 			size: gs.size,
 			capacity: gs.capacity,
 			hits: gs.hits,
-			misses: misses,
+			misses: gs.misses,
 			evictions: gs.evictions,
 			hitRate: gs.hits + gs.misses > 0 ? `${((gs.hits / (gs.hits + gs.misses)) * 100).toFixed(1)}%` : 'n/a',
 			ttl: `${CACHE_TTL_GENERAL / 86400_000} days`,
