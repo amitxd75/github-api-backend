@@ -141,6 +141,8 @@ X-RateLimit-Limit: 5000
 
 Fetch comprehensive stats for a GitHub user. Powered by a **single GraphQL query** — no N+1 REST calls.
 
+**Hybrid Mode:** If `PRIMARY_GITHUB_USERNAME` and `ALT_GITHUB_USERNAME` are configured, requesting the primary username will automatically return aggregated stats from **both** accounts (Commits, PRs, Issues, Repos, Stars, and merged Contribution Calendars).
+
 ```http
 GET /api/github/v2/stats?username=<username>&force=<true|false>
 GET /api/github/v2/stats/:username?force=<true|false>
@@ -459,6 +461,12 @@ curl "http://localhost:3001/health"
 <div align="center">
 
 **Made with ❤️ by [amitxd75](https://github.com/amitxd75)**
+
+</div>
+om/amitxd75)**
+
+</div>
+xd75)**
 
 </div>
 om/amitxd75)**

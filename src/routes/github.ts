@@ -1,9 +1,9 @@
 /**
  * GitHub API Routes Module
- * 
+ *
  * Provides high-performance endpoints for interacting with the GitHub API, 
  * featuring an optimized statistics engine and an intelligent proxy layer.
- * 
+ *
  * Technical Architecture:
  * - GraphQL Engine: Aggregates profile, repository, and contribution data in a single round-trip.
  * - LRU Caching: Implements a high-efficiency O(1) cache with TTL-based eviction.
@@ -31,11 +31,11 @@ const USER_AGENT = 'Portfolio-Backend/3.0';
 
 const CACHE_TTL_GENERAL = 1000 * 60 * 60 * 24 * 14; // 14 days
 const CACHE_TTL_STATS = 1000 * 60 * 60 * 6;        // 6 hours
-const CACHE_CAPACITY = 1_000;
+const CAACITY = 1_000;
 
 // ─── Caches ───────────────────────────────────────────────────────────────────
 
-const generalCache = new LRUCache(CACHE_CAPACITY, CACHE_TTL_GENERAL);
+const generalCache = new LRUCache(CAACITY, CACHE_TTL_GENERAL);
 const statsCache = new LRUCache<GitHubStats>(200, CACHE_TTL_STATS);
 
 // Periodic cleanup of expired entries (every hour)
@@ -54,24 +54,85 @@ export const githubRouter = Router();
 /**
  * Constructs the standard set of headers for GitHub API requests.
  * Automatically attaches the GITHUB_TOKEN if configured in the environment.
- * 
+ *
  * @param accept - The media type for the Accept header (defaults to v3 json)
+ * @param token - Optional explicit token to use instead of GITHUB_TOKEN env
  * @returns Header object for fetch requests
  */
-function getAuthHeaders(accept = 'application/vnd.github.v3+json'): Record<string, string> {
+function getAuthHeaders(accept = 'application/vnd.github.v3+json', token?: string): Record<string, string> {
 	const headers: Record<string, string> = {
 		Accept: accept,
 		'User-Agent': USER_AGENT,
 	};
-	const token = process.env.GITHUB_TOKEN?.trim();
-	if (token) headers['Authorization'] = `Bearer ${token}`;
+	const authToken = token?.trim() || process.env.GITHUB_TOKEN?.trim();
+	if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
 	return headers;
+}
+
+/**
+ * Fetches raw data from GitHub API for a given user.
+ *
+ * @param username - GitHub login
+ * @param token - Optional token for authentication
+ * @returns Raw data from GraphQL and REST
+ */
+async function fetchRawGitHubData(username: string, token?: string) {
+	// ── 1. GraphQL — one round-trip for everything ──────────────────────────────
+	const gqlRes = await fetchWithRetry(GITHUB_GQL, {
+		method: 'POST',
+		headers: {
+			...getAuthHeaders('application/json', token),
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({
+			query: buildStatsQuery(),
+			variables: { login: username },
+		}),
+	});
+
+	if (!gqlRes.ok) {
+		if (gqlRes.status === 401) throw new Error(`GitHub API authentication failed for ${username}`);
+		throw new Error(`GraphQL request failed for ${username}: ${gqlRes.status}`);
+	}
+
+	const gql = await gqlRes.json() as GraphQLResponse;
+
+	if (gql.errors?.length) {
+		const msg = gql.errors[0]?.message ?? 'GraphQL error';
+		if (msg.toLowerCase().includes('could not resolve to a user')) {
+			throw new Error(`User '${username}' not found`);
+		}
+		throw new Error(`GraphQL error for ${username}: ${msg}`);
+	}
+
+	const user = gql.data?.user as GitHubGQLUser | null;
+	if (!user) throw new Error(`User '${username}' not found`);
+
+	// ── 2. REST: user profile + recent events — parallel ────────────────────────
+	const restHeaders = { headers: getAuthHeaders('application/vnd.github.v3+json', token) };
+	const [userRes, eventsRes] = await Promise.allSettled([
+		fetchWithRetry(`${GITHUB_API}/users/${username}`, restHeaders),
+		fetchWithRetry(`${GITHUB_API}/users/${username}/events?per_page=100`, restHeaders),
+	]);
+
+	let publicGists = 0;
+	if (userRes.status === 'fulfilled' && userRes.value.ok) {
+		const u = await userRes.value.json() as GitHubUser;
+		publicGists = u.public_gists;
+	}
+
+	let eventsData: GitHubEvent[] = [];
+	if (eventsRes.status === 'fulfilled' && eventsRes.value.ok) {
+		eventsData = await eventsRes.value.json() as GitHubEvent[];
+	}
+
+	return { user, publicGists, eventsData };
 }
 
 /**
  * Fetch with exponential-backoff retry.
  * Retries on 5xx and transient network errors. Stops immediately on 4xx.
- * 
+ *
  * @param url - Target URL
  * @param options - Fetch options
  * @param maxRetries - Maximum number of retry attempts
@@ -124,7 +185,7 @@ async function fetchWithRetry(
 
 /**
  * Simple async delay helper using Promises and setTimeout.
- * 
+ *
  * @param ms - Milliseconds to sleep
  */
 function sleep(ms: number): Promise<void> {
@@ -133,7 +194,7 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Extracts GitHub rate limit information from response headers.
- * 
+ *
  * @param res - The Response object from fetch
  * @returns Rate limit information
  */
@@ -149,9 +210,9 @@ function extractRateLimit(res: Response): RateLimit {
 
 /**
  * Generates the GraphQL query string to fetch all necessary GitHub data in a single request.
- * Fetches: user profile, top 100 repositories (with language breakdown), 
+ * Fetches: user profile, top 100 repositories (with language breakdown),
  * and the 365-day contribution calendar.
- * 
+ *
  * @returns The formatted GraphQL query
  */
 function buildStatsQuery(): string {
@@ -217,7 +278,7 @@ interface ContribWeek { contributionDays: ContribDay[] }
  * A streak is defined as consecutive days with at least one contribution.
  * Today and yesterday are allowed to be 0 without breaking the current streak
  * to account for time zones and pending updates.
- * 
+ *
  * @param weeks - The contribution calendar weeks from GitHub GraphQL API
  * @returns Current and longest streak counts
  */
@@ -266,66 +327,17 @@ function computeStreaks(weeks: ContribWeek[]): StreakResult {
 // ─── Core stats fetcher ───────────────────────────────────────────────────────
 
 /**
- * Orchestrates the data fetching and aggregation for a user's GitHub statistics.
- * Combines a high-efficiency GraphQL query with supplemental REST calls.
- * 
- * @param username - The GitHub login to fetch stats for
- * @returns The aggregated statistics object
- * @throws {Error} If user is not found or API authentication fails
+ * Computes aggregated statistics from raw GitHub data.
+ *
+ * @param username - GitHub login
+ * @param rawData - Data fetched from API
+ * @returns Aggregated statistics
  */
-async function fetchGitHubStats(username: string): Promise<GitHubStats> {
-	// ── 1. GraphQL — one round-trip for everything ──────────────────────────────
-	const gqlRes = await fetchWithRetry(GITHUB_GQL, {
-		method: 'POST',
-		headers: {
-			...getAuthHeaders('application/json'),
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({
-			query: buildStatsQuery(),
-			variables: { login: username },
-		}),
-	});
-
-	if (!gqlRes.ok) {
-		if (gqlRes.status === 401) throw new Error('GitHub API authentication failed');
-		throw new Error(`GraphQL request failed: ${gqlRes.status}`);
-	}
-
-	const gql = await gqlRes.json() as GraphQLResponse;
-
-	if (gql.errors?.length) {
-		const msg = gql.errors[0]?.message ?? 'GraphQL error';
-		if (msg.toLowerCase().includes('could not resolve to a user')) {
-			throw new Error(`User '${username}' not found`);
-		}
-		throw new Error(`GraphQL error: ${msg}`);
-	}
-
-	const user = gql.data?.user as GitHubGQLUser | null;
-	if (!user) throw new Error(`User '${username}' not found`);
-
-	// ── 2. REST: user profile + public gists + recent events — parallel ─────────
-	const restHeaders = { headers: getAuthHeaders() };
-	const [userRes, eventsRes] = await Promise.allSettled([
-		fetchWithRetry(`${GITHUB_API}/users/${username}`, restHeaders),
-		fetchWithRetry(`${GITHUB_API}/users/${username}/events?per_page=100`, restHeaders),
-	]);
-
-	// Public gists — from REST profile (GraphQL doesn't expose this easily)
-	let publicGists = 0;
-	if (userRes.status === 'fulfilled' && userRes.value.ok) {
-		const u = await userRes.value.json() as GitHubUser;
-		publicGists = u.public_gists;
-	}
-
-	// Events — for supplementary commit counting cross-check
-	let eventsData: GitHubEvent[] = [];
-	if (eventsRes.status === 'fulfilled' && eventsRes.value.ok) {
-		eventsData = await eventsRes.value.json() as GitHubEvent[];
-	}
-
-	// ── 3. Aggregate from GraphQL data ──────────────────────────────────────────
+function computeGitHubStats(
+	username: string,
+	rawData: { user: GitHubGQLUser; publicGists: number; eventsData: GitHubEvent[] }
+): GitHubStats {
+	const { user, publicGists, eventsData } = rawData;
 	const repos = user.repositories.nodes;
 
 	let totalStars = 0;
@@ -336,6 +348,14 @@ async function fetchGitHubStats(username: string): Promise<GitHubStats> {
 	const languageBytes: Record<string, number> = {};
 	let totalBytes = 0;
 
+	const weightsRaw = process.env.LANGUAGE_WEIGHTS || '';
+	const weights: Record<string, number> = Object.fromEntries(
+		weightsRaw.split(',').filter(Boolean).map(s => {
+			const [lang, weight] = s.split(':');
+			return [lang, parseFloat(weight) || 1.0];
+		})
+	);
+
 	for (const repo of repos) {
 		totalStars += repo.stargazerCount;
 		totalForks += repo.forkCount;
@@ -343,8 +363,10 @@ async function fetchGitHubStats(username: string): Promise<GitHubStats> {
 		if (repo.pushedAt && repo.pushedAt > oneMonthAgo) recentRepoActivity++;
 
 		for (const edge of repo.languages.edges) {
-			languageBytes[edge.node.name] = (languageBytes[edge.node.name] ?? 0) + edge.size;
-			totalBytes += edge.size;
+			const weight = weights[edge.node.name] ?? 1.0;
+			const weightedSize = edge.size * weight;
+			languageBytes[edge.node.name] = (languageBytes[edge.node.name] ?? 0) + weightedSize;
+			totalBytes += weightedSize;
 		}
 	}
 
@@ -358,19 +380,15 @@ async function fetchGitHubStats(username: string): Promise<GitHubStats> {
 		)
 		: {};
 
-	// ── 4. Streaks from contribution calendar ───────────────────────────────────
 	const { current: currentStreak, longest: longestStreak } = computeStreaks(
 		user.contributionsCollection.contributionCalendar.weeks
 	);
 
-	// ── 5. Last activity ─────────────────────────────────────────────────────────
 	const lastActivity =
 		eventsData[0]?.created_at ??
 		repos[0]?.pushedAt ??
 		user.createdAt;
 
-	// ── 6. Forked repos count (using forks from all repos the user owns) ─────────
-	// GraphQL query only fetches OWNER non-fork repos; get fork count from REST
 	const contributedTo = user.repositories.nodes.filter(r => r.isFork).length;
 
 	return {
@@ -406,6 +424,119 @@ async function fetchGitHubStats(username: string): Promise<GitHubStats> {
 
 		lastUpdated: new Date().toISOString(),
 	};
+}
+
+/**
+ * Orchestrates the data fetching and aggregation for a user's GitHub statistics.
+ * Combines a high-efficiency GraphQL query with supplemental REST calls.
+ *
+ * @param username - The GitHub login to fetch stats for
+ * @param token - Optional token for authentication
+ * @returns The aggregated statistics object
+ */
+async function fetchGitHubStats(username: string, token?: string): Promise<GitHubStats> {
+	const rawData = await fetchRawGitHubData(username, token);
+	return computeGitHubStats(username, rawData);
+}
+
+/**
+ * Merges two contribution calendars by summing daily contribution counts.
+ *
+ * @param weeks1 - First calendar
+ * @param weeks2 - Second calendar
+ * @returns Merged weeks
+ */
+function mergeContributionCalendars(
+	weeks1: ContribWeek[],
+	weeks2: ContribWeek[]
+): ContribWeek[] {
+	const dayMap = new Map<string, number>();
+
+	const processWeeks = (weeks: ContribWeek[]) => {
+		for (const week of weeks) {
+			for (const day of week.contributionDays) {
+				dayMap.set(day.date, (dayMap.get(day.date) || 0) + day.contributionCount);
+			}
+		}
+	};
+
+	processWeeks(weeks1);
+	processWeeks(weeks2);
+
+	const allDays = Array.from(dayMap.entries())
+		.map(([date, contributionCount]) => ({ date, contributionCount }))
+		.sort((a, b) => a.date.localeCompare(b.date));
+
+	const weeks: ContribWeek[] = [];
+	for (let i = 0; i < allDays.length; i += 7) {
+		weeks.push({ contributionDays: allDays.slice(i, i + 7) });
+	}
+	return weeks;
+}
+
+/**
+ * Fetches and merges statistics from two different GitHub accounts.
+ *
+ * @param primaryUsername - Main account login
+ * @param altUsername - Secondary account login
+ * @returns Merged statistics
+ */
+async function fetchHybridGitHubStats(
+	primaryUsername: string,
+	altUsername: string
+): Promise<GitHubStats> {
+	const primaryToken = process.env.GITHUB_TOKEN;
+	const altToken = process.env.ALT_GITHUB_TOKEN;
+
+	console.log(`[hybrid] fetching primary:${primaryUsername} + alt:${altUsername}`);
+
+	const [primaryRaw, altRaw] = await Promise.all([
+		fetchRawGitHubData(primaryUsername, primaryToken),
+		fetchRawGitHubData(altUsername, altToken)
+	]);
+
+	const mergedRaw = {
+		user: {
+			...primaryRaw.user,
+			repositories: {
+				totalCount: primaryRaw.user.repositories.totalCount + altRaw.user.repositories.totalCount,
+				nodes: [...primaryRaw.user.repositories.nodes, ...altRaw.user.repositories.nodes]
+			},
+			contributionsCollection: {
+				totalCommitContributions:
+					primaryRaw.user.contributionsCollection.totalCommitContributions +
+					altRaw.user.contributionsCollection.totalCommitContributions,
+				totalPullRequestContributions:
+					primaryRaw.user.contributionsCollection.totalPullRequestContributions +
+					altRaw.user.contributionsCollection.totalPullRequestContributions,
+				totalIssueContributions:
+					primaryRaw.user.contributionsCollection.totalIssueContributions +
+					altRaw.user.contributionsCollection.totalIssueContributions,
+				contributionCalendar: {
+					weeks: mergeContributionCalendars(
+						primaryRaw.user.contributionsCollection.contributionCalendar.weeks,
+						altRaw.user.contributionsCollection.contributionCalendar.weeks
+					)
+				}
+			},
+			followers: {
+				totalCount: primaryRaw.user.followers.totalCount + altRaw.user.followers.totalCount
+			},
+			following: {
+				totalCount: primaryRaw.user.following.totalCount + altRaw.user.following.totalCount
+			}
+		},
+		publicGists: primaryRaw.publicGists + altRaw.publicGists,
+		eventsData: [...primaryRaw.eventsData, ...altRaw.eventsData].sort((a, b) =>
+			(b.created_at || '').localeCompare(a.created_at || '')
+		)
+	};
+
+	return computeGitHubStats(primaryUsername, mergedRaw as {
+		user: GitHubGQLUser;
+		publicGists: number;
+		eventsData: GitHubEvent[];
+	});
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -482,7 +613,7 @@ githubRouter.get('/v2', async (req: Request, res: ExpressResponse) => {
 /**
  * Shared handler for GitHub stats requests.
  * Manages caching logic and orchestrates the data fetching process.
- * 
+ *
  * @param username - GitHub username (validated against standard regex)
  * @param force - If 'true', skips the cache and fetches fresh data
  * @param res - Express response object
@@ -514,10 +645,17 @@ async function handleStatsRequest(
 		}
 	}
 
-	console.log(`[stats] fetching via GraphQL: ${username}`);
+	const primaryUser = process.env.PRIMARY_GITHUB_USERNAME;
+	const altUser = process.env.ALT_GITHUB_USERNAME;
+	const isHybrid = primaryUser && altUser && username.toLowerCase() === primaryUser.toLowerCase();
+
+	console.log(`[stats] fetching ${isHybrid ? 'HYBRID' : 'via GraphQL'}: ${username}`);
 
 	try {
-		const stats = await fetchGitHubStats(username);
+		const stats = isHybrid
+			? await fetchHybridGitHubStats(primaryUser, altUser)
+			: await fetchGitHubStats(username);
+
 		statsCache.set(cacheKey, stats);
 		console.log(`[stats] cached: ${username}`);
 		return res.json(stats);
@@ -549,7 +687,7 @@ githubRouter.get('/v2/cache/status', (_req, res) => {
 			size: gs.size,
 			capacity: gs.capacity,
 			hits: gs.hits,
-			misses: gs.misses,
+			misses: misses,
 			evictions: gs.evictions,
 			hitRate: gs.hits + gs.misses > 0 ? `${((gs.hits / (gs.hits + gs.misses)) * 100).toFixed(1)}%` : 'n/a',
 			ttl: `${CACHE_TTL_GENERAL / 86400_000} days`,

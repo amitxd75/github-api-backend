@@ -328,6 +328,10 @@ print(f"{stats['totalCommits']} commits · {stats['currentStreak']} day streak")
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `GITHUB_TOKEN` | **Yes for /stats** | — | GitHub PAT — needs `read:user`, `public_repo` |
+| `PRIMARY_GITHUB_USERNAME` | No | — | Primary account for Hybrid stats |
+| `ALT_GITHUB_USERNAME` | No | — | Secondary account for Hybrid stats |
+| `ALT_GITHUB_TOKEN` | No | — | PAT for secondary account |
+| `LANGUAGE_WEIGHTS` | No | — | Boost specific languages (e.g., `Rust:2.0`) |
 | `NODE_ENV` | No | `development` | `development` or `production` |
 | `ALLOWED_ORIGINS` | No | `http://localhost:3000` | Comma-separated CORS origins |
 | `PORT` | No | `3001` | Local server port |
