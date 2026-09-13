@@ -18,6 +18,7 @@ import dotenv from 'dotenv';
 import { githubRouter } from '../../src/routes/github';
 import { errorHandler } from '../../src/middleware/errorHandler';
 import { requestLogger } from '../../src/middleware/requestLogger';
+import { apiRateLimiter } from '../../src/middleware/rateLimiter';
 
 /**
  * Module-level flag for warm function detection in serverless environments.
@@ -32,6 +33,12 @@ dotenv.config();
  * The Express application instance.
  */
 const app = express();
+
+// Trust proxy for proper IP resolution behind Netlify gateway
+app.set('trust proxy', 1);
+
+// Apply rate limiting middleware to prevent DoS and quota exhaustion
+app.use(apiRateLimiter);
 
 // Security middleware - adds various HTTP headers for security
 app.use(helmet());
@@ -90,7 +97,7 @@ app.get('/health', (req: Request, res: Response) => {
 		status: 'OK',
 		timestamp: new Date().toISOString(),
 		uptime: Math.floor(process.uptime()),
-		version: process.env.npm_package_version || '3.0.0',
+		version: process.env.npm_package_version || '3.1.0',
 		environment: 'netlify-functions',
 		platform: 'serverless',
 		memory: {
@@ -113,7 +120,7 @@ app.use('/api/github', githubRouter);
 app.get('/api', (req: Request, res: Response) => {
 	res.json({
 		name: 'GitHub API Backend',
-		version: '3.0.0',
+		version: process.env.npm_package_version || '3.1.0',
 		description: 'GitHub GraphQL + REST proxy with LRU cache and comprehensive stats',
 		author: 'amitxd75',
 		platform: 'netlify-functions',

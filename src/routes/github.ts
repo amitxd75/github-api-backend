@@ -14,6 +14,7 @@
 
 import { Router, Request, Response as ExpressResponse } from 'express';
 import { LRUCache } from '../cache/lruCache';
+import { isValidAdmin, requireAdminAuth } from '../middleware/auth';
 import {
 	GitHubStats,
 	GitHubUser,
@@ -39,11 +40,12 @@ const generalCache = new LRUCache(CAACITY, CACHE_TTL_GENERAL);
 const statsCache = new LRUCache<GitHubStats>(200, CACHE_TTL_STATS);
 
 // Periodic cleanup of expired entries (every hour)
-setInterval(() => {
+const cleanupTimer = setInterval(() => {
 	const g = generalCache.evictExpired();
 	const s = statsCache.evictExpired();
 	if (g + s > 0) console.log(`[cache] evicted ${g} general + ${s} stats expired entries`);
 }, 60 * 60 * 1000);
+cleanupTimer.unref();
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -539,6 +541,62 @@ async function fetchHybridGitHubStats(
 	});
 }
 
+// ─── Endpoint Security ────────────────────────────────────────────────────────
+
+/**
+ * Validates requested GitHub proxy endpoint without cryptic regexes.
+ * Public requests are strictly restricted to public `/users/...` and `/repos/...` paths.
+ * Private account endpoints (like `/user`) require an Admin API key.
+ */
+function validateProxyEndpoint(endpoint: string, isAdmin: boolean): { valid: boolean; reason?: string } {
+	// 1. Basic formatting checks
+	if (!endpoint.startsWith('/') || endpoint.includes('..') || endpoint.includes('//') || endpoint.includes('\\') || endpoint.includes('@') || /\s/.test(endpoint)) {
+		return { valid: false, reason: 'Malformed or invalid endpoint format' };
+	}
+
+	// 2. Admin key grants access to any endpoint
+	if (isAdmin) {
+		return { valid: true };
+	}
+
+	// 3. Extract clean path segments (e.g. "/users/Amitminer/repos?sort=updated" -> ["users", "amitminer", "repos"])
+	const rawPath = endpoint.split('?')[0] || '';
+	const pathname = rawPath.toLowerCase();
+	const segments = pathname.split('/').filter(Boolean);
+
+	// 4. Reject any attempt to hit authenticated user endpoints (/user, /user/repos, etc.)
+	if (segments[0] === 'user') {
+		return {
+			valid: false,
+			reason: 'Authenticated user endpoints (/user) require an Admin API key. Public profile data is available at /users/:username.',
+		};
+	}
+
+	// 5. Block private visibility query parameters
+	const query = endpoint.toLowerCase();
+	if (query.includes('visibility=private') || query.includes('visibility=all') || query.includes('type=private') || query.includes('type=all')) {
+		return {
+			valid: false,
+			reason: 'Private visibility parameters are not allowed on public endpoints.',
+		};
+	}
+
+	// 6. Public callers may ONLY query public user or repository data:
+	//    - /users/<username>... (e.g. /users/Amitminer/repos)
+	//    - /repos/<owner>/<repo>... (e.g. /repos/Amitminer/project)
+	const isPublicUserRoute = segments[0] === 'users' && segments.length >= 2;
+	const isPublicRepoRoute = segments[0] === 'repos' && segments.length >= 3;
+
+	if (!isPublicUserRoute && !isPublicRepoRoute) {
+		return {
+			valid: false,
+			reason: `Endpoint '${pathname}' is restricted. Only public user and repository paths (/users/... or /repos/...) are accessible without an Admin API key.`,
+		};
+	}
+
+	return { valid: true };
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 /** Generic GitHub REST proxy with optional caching */
@@ -548,13 +606,17 @@ githubRouter.get('/v2', async (req: Request, res: ExpressResponse) => {
 	if (!endpoint || typeof endpoint !== 'string') {
 		return res.status(400).json({
 			error: 'endpoint parameter required',
-			usage: 'GET /api/github/v2?endpoint=/users/username',
+			usage: 'GET /api/github/v2?endpoint=/users/username/repos',
 		});
 	}
-	if (!endpoint.startsWith('/')) {
-		return res.status(400).json({
-			error: 'endpoint must start with /',
-			example: '/users/username/repos',
+
+	const isAdmin = isValidAdmin(req);
+	const validation = validateProxyEndpoint(endpoint, isAdmin);
+	if (!validation.valid) {
+		return res.status(403).json({
+			error: 'Access denied to requested endpoint',
+			details: validation.reason,
+			endpoint,
 		});
 	}
 
@@ -676,7 +738,11 @@ async function handleStatsRequest(
 }
 
 githubRouter.get('/v2/stats', async (req, res) => handleStatsRequest(req.query.username as string | undefined, req.query.force as string | undefined, res));
-githubRouter.get('/v2/stats/:username', async (req, res) => handleStatsRequest(req.params.username, req.query.force as string | undefined, res));
+githubRouter.get('/v2/stats/:username', async (req, res) => {
+	const rawUsername = req.params.username;
+	const username = Array.isArray(rawUsername) ? rawUsername[0] : rawUsername;
+	return handleStatsRequest(username, req.query.force as string | undefined, res);
+});
 
 /** Cache status endpoint */
 githubRouter.get('/v2/cache/status', (_req, res) => {
@@ -706,15 +772,16 @@ githubRouter.get('/v2/cache/status', (_req, res) => {
 });
 
 /** Clear all caches */
-githubRouter.delete('/v2/cache', (_req, res) => {
+githubRouter.delete('/v2/cache', requireAdminAuth, (_req, res) => {
 	const g = generalCache.clear();
 	const s = statsCache.clear();
 	res.json({ message: 'Cache cleared', general: g, stats: s, timestamp: new Date().toISOString() });
 });
 
 /** Clear specific cache entry */
-githubRouter.delete('/v2/cache/:key', (req, res) => {
-	const key = req.params['key'];
+githubRouter.delete('/v2/cache/:key', requireAdminAuth, (req, res) => {
+	const rawKey = req.params['key'];
+	const key = Array.isArray(rawKey) ? rawKey[0] : rawKey;
 	if (!key) {
 		return res.status(400).json({ error: 'Cache key required' });
 	}

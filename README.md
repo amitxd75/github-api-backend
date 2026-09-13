@@ -30,6 +30,9 @@
 
 ### 🛡️ Security & Performance
 - Helmet.js security headers
+- Inbound IP rate limiting (protects token quota and prevents DoS)
+- Confused deputy protection (blocks private `/user` routes without Admin key)
+- Admin API Key authorization for cache management and administrative tasks
 - Configurable CORS
 - Rate-limit headers forwarded to the client
 - Username validation before hitting GitHub
@@ -68,6 +71,8 @@ src/
 ├── cache/
 │   └── lruCache.ts            # LRU cache implementation
 └── middleware/
+    ├── auth.ts
+    ├── rateLimiter.ts
     ├── requestLogger.ts
     └── errorHandler.ts
 types.ts                       # Shared TypeScript interfaces

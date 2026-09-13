@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import { githubRouter } from './routes/github';
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
+import { apiRateLimiter } from './middleware/rateLimiter';
 
 dotenv.config();
 
@@ -19,6 +20,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // ─── Security & Middleware ────────────────────────────────────────────────────
+
+// Enable trust proxy for correct IP detection behind proxies/load balancers
+app.set('trust proxy', 1);
+
+// Apply rate limiting middleware to prevent DoS and quota exhaustion
+app.use(apiRateLimiter);
 
 /**
  * Configure Helmet with a custom Content Security Policy.
@@ -57,18 +64,19 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Custom request logger for performance and usage monitoring
 app.use(requestLogger);
 
-/**
- * Serve the static test UI (index.html).
- * Configured with basic performance optimizations like extensions and etag.
- */
-app.use(express.static('.', {
-	index: 'index.html',
-	dotfiles: 'ignore',
-	etag: false,
-	extensions: ['html', 'js', 'css'],
-	maxAge: '1d',
-	redirect: false,
-}));
+const isDevelopment = process.env.NODE_ENV !== 'production';
+
+// Serve the static test UI (index.html) only in development
+if (isDevelopment) {
+	app.use(express.static('.', {
+		index: false,
+		dotfiles: 'ignore',
+		etag: false,
+		extensions: ['html', 'js', 'css'],
+		maxAge: '1d',
+		redirect: false,
+	}));
+}
 
 /**
  * Health check endpoint.
@@ -79,7 +87,7 @@ app.get('/health', (_req, res) => {
 		status: 'OK',
 		timestamp: new Date().toISOString(),
 		uptime: Math.floor(process.uptime()),
-		version: process.env.npm_package_version ?? '3.0.0',
+		version: process.env.npm_package_version ?? '3.1.0',
 		environment: process.env.NODE_ENV ?? 'development',
 		githubToken: process.env.GITHUB_TOKEN ? 'configured' : 'missing (rate limited to 60 req/hr)',
 		memory: {
@@ -96,7 +104,7 @@ app.get('/health', (_req, res) => {
 app.get('/api', (_req, res) => {
 	res.json({
 		name: 'GitHub API Backend',
-		version: '3.0.0',
+		version: process.env.npm_package_version ?? '3.1.0',
 		description: 'GitHub GraphQL + REST proxy with LRU cache and comprehensive stats',
 		endpoints: {
 			health: 'GET /health',
@@ -120,9 +128,20 @@ app.get('/api', (_req, res) => {
 });
 
 /**
- * Root route serving the test UI.
+ * Root route: serves test UI in development, or API info in production.
  */
-app.get('/', (_req, res) => res.sendFile('index.html', { root: '.' }));
+app.get('/', (_req, res) => {
+	if (isDevelopment) {
+		return res.sendFile('index.html', { root: '.' });
+	}
+	return res.json({
+		name: 'GitHub API Backend',
+		status: 'online',
+		version: process.env.npm_package_version ?? '3.1.0',
+		endpoints: '/api',
+		health: '/health',
+	});
+});
 
 // Mount GitHub routes
 app.use('/api/github', githubRouter);

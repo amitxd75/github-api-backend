@@ -22,16 +22,18 @@ A fast, accurate GitHub API proxy and statistics aggregator featuring:
 
 ---
 
-## 🔐 Authentication
+## 🔐 Authentication & Security
 
-| | Without Token | With Token |
+| Feature | Unauthenticated / Public | With Admin API Key (`X-API-Key`) |
 |---|---|---|
-| REST proxy | 60 req/hr | 5000 req/hr |
-| Stats (GraphQL) | ❌ Not supported | ✅ Required |
+| REST Proxy (Public routes) | ✅ Allowed (e.g. `/users/:user/repos`, `/repos/:owner/:repo`) | ✅ Allowed |
+| REST Proxy (Private / `/user`) | ❌ 403 Forbidden | ✅ Allowed |
+| Cache Clearing (`DELETE /cache`) | ❌ 401 Unauthorized | ✅ Allowed |
+| Inbound Rate Limiting | 100 requests / 15 min per IP | Exempt |
+| GitHub Token Budget | 5,000 req/hr (server-side via `GITHUB_TOKEN`) | 5,000 req/hr |
 
-> **Note:** The `/stats` endpoint uses GitHub's GraphQL API which requires authentication. Set `GITHUB_TOKEN` in your environment — only `read:user` and `public_repo` scopes are needed.
-
-Get a token at [github.com/settings/tokens](https://github.com/settings/tokens).
+> **Backend Admin Key:** Set `ADMIN_API_KEY` in your environment. Provide it via header `X-API-Key: <key>` or `Authorization: Bearer <key>` for administrative actions.
+> **GitHub Token:** Set `GITHUB_TOKEN` in your environment with only `read:user` and `public_repo` scopes.
 
 ---
 
@@ -49,7 +51,7 @@ GET /health
   "status": "OK",
   "timestamp": "2024-01-15T10:30:00.000Z",
   "uptime": 3600,
-  "version": "3.0.0",
+  "version": "3.1.0",
   "environment": "development",
   "githubToken": "configured",
   "memory": {
@@ -79,6 +81,10 @@ Proxy any GitHub REST API endpoint with optional caching.
 GET /api/github/v2?endpoint=<github-path>&cache=<true|false>
 ```
 
+**Security & Route Restrictions:**
+- **Publicly Allowed:** `/users/:username` (and `/repos`, `/gists`, `/events`, `/orgs`), `/repos/:owner/:repo` (and `/languages`, `/commits`, `/releases`, `/tags`), `/orgs/:org`, `/search/*`.
+- **Restricted / Requires Admin Key (`X-API-Key`):** `/user`, `/user/repos`, `/user/emails`, and all authenticated account routes.
+
 **Parameters:**
 
 | Parameter | Required | Description |
@@ -88,17 +94,17 @@ GET /api/github/v2?endpoint=<github-path>&cache=<true|false>
 
 **Examples:**
 ```bash
-# User profile
+# Public user profile
 curl "http://localhost:3001/api/github/v2?endpoint=/users/octocat"
 
-# Repos with caching
+# User repos with caching
 curl "http://localhost:3001/api/github/v2?endpoint=/users/octocat/repos&cache=true"
 
 # Repository details
 curl "http://localhost:3001/api/github/v2?endpoint=/repos/octocat/Hello-World"
 
-# Repository languages
-curl "http://localhost:3001/api/github/v2?endpoint=/repos/octocat/Hello-World/languages"
+# Access restricted route with Admin Key
+curl -H "X-API-Key: your_admin_key" "http://localhost:3001/api/github/v2?endpoint=/user"
 ```
 
 **Response (non-array):** GitHub's response is returned as-is. Cached responses include extra fields:
@@ -120,9 +126,12 @@ X-RateLimit-Limit: 5000
 **Error responses:**
 ```json
 // 400 - Missing or invalid endpoint
-{ "error": "endpoint parameter required", "usage": "GET /api/github/v2?endpoint=/users/username" }
+{ "error": "endpoint parameter required", "usage": "GET /api/github/v2?endpoint=/users/username/repos" }
 
-// 401 - Token invalid
+// 403 - Restricted endpoint without Admin API Key
+{ "error": "Access denied to requested endpoint", "details": "Authenticated user endpoints (e.g. /user) require an Admin API key." }
+
+// 401 - GitHub token invalid
 { "error": "GitHub token invalid or expired" }
 
 // 429 - Rate limit

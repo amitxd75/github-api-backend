@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>GitHub API Backend v3.0 - Tester</title>
+  <title>GitHub API Backend v3.1.0 - Tester</title>
   <style>
     :root {
       --bg: #1e1e2f;
@@ -110,7 +110,7 @@
   </style>
 </head>
 <body>
-  <h1>🚀 GitHub API Backend v3.0</h1>
+  <h1>🚀 GitHub API Backend v3.1.0</h1>
   <p>Test your GitHub API proxy and stats endpoints:</p>
 
   <form id="api-form">
@@ -119,6 +119,9 @@
 
     <label for="username">GitHub Username (for stats):</label>
     <input type="text" id="username" value="amitxd75" placeholder="Enter GitHub username" />
+
+    <label for="apiKey">Admin API Key (Optional, for private/restricted endpoints):</label>
+    <input type="password" id="apiKey" placeholder="Enter Admin API Key (X-API-Key)" />
 
     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
       <button type="submit" style="flex: 1;">🔍 Test Both</button>
@@ -151,6 +154,15 @@
       resultDiv.className = "";
     }
 
+    function getHeaders() {
+      const apiKey = document.getElementById('apiKey')?.value.trim();
+      const headers = {};
+      if (apiKey) {
+        headers['X-API-Key'] = apiKey;
+      }
+      return headers;
+    }
+
     async function testEndpoint() {
       const endpoint = document.getElementById('endpoint').value.trim();
       if (!endpoint) {
@@ -160,7 +172,9 @@
 
       setLoading();
       try {
-        const res = await fetch(`/api/github/v2/?endpoint=${encodeURIComponent(endpoint)}`);
+        const res = await fetch(`/api/github/v2/?endpoint=${encodeURIComponent(endpoint)}`, {
+          headers: getHeaders(),
+        });
         const data = await res.json();
         setResult(`📡 Endpoint: ${endpoint}\n\n${JSON.stringify(data, null, 2)}`, res.ok);
       } catch (err) {
@@ -177,7 +191,9 @@
 
       setLoading();
       try {
-        const res = await fetch(`/api/github/v2/stats?username=${encodeURIComponent(username)}`);
+        const res = await fetch(`/api/github/v2/stats?username=${encodeURIComponent(username)}`, {
+          headers: getHeaders(),
+        });
         const data = await res.json();
         setResult(`📊 Stats for: ${username}\n\n${JSON.stringify(data, null, 2)}`, res.ok);
       } catch (err) {
@@ -197,9 +213,10 @@
 
       setLoading();
       try {
+        const headers = getHeaders();
         const [proxyRes, statsRes] = await Promise.all([
-          fetch(`/api/github/v2/?endpoint=${encodeURIComponent(endpoint)}`),
-          fetch(`/api/github/v2/stats?username=${encodeURIComponent(username)}`)
+          fetch(`/api/github/v2/?endpoint=${encodeURIComponent(endpoint)}`, { headers }),
+          fetch(`/api/github/v2/stats?username=${encodeURIComponent(username)}`, { headers })
         ]);
 
         const proxyData = await proxyRes.json();

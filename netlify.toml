@@ -5,6 +5,19 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# Redirect root and index.html to API discovery to prevent serving tester UI in production
+[[redirects]]
+  from = "/"
+  to = "/.netlify/functions/api/api"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/index.html"
+  to = "/.netlify/functions/api/api"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
@@ -23,4 +36,4 @@
   [headers.values]
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
-    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    Access-Control-Allow-Headers = "Content-Type, Authorization, X-API-Key"
