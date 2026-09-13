@@ -117,7 +117,7 @@ app.use('/api/github', githubRouter);
 /**
  * API documentation endpoint for Netlify Functions.
  */
-app.get('/api', (req: Request, res: Response) => {
+app.get(['/', '/api'], (req: Request, res: Response) => {
 	res.json({
 		name: 'GitHub API Backend',
 		version: process.env.npm_package_version || '3.1.0',

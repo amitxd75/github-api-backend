@@ -20,6 +20,26 @@ function getMaxRequests(): number {
 }
 
 /**
+ * Resolves the client IP address safely across local and serverless (Netlify/AWS) environments.
+ * Avoids undefined errors in serverless-http where req.ip is not automatically populated.
+ */
+function getClientIp(req: Request): string {
+	const xForwardedFor = req.headers['x-forwarded-for'];
+	if (typeof xForwardedFor === 'string' && xForwardedFor.length > 0) {
+		const first = xForwardedFor.split(',')[0]?.trim();
+		if (first) return first;
+	}
+	const nfIp = req.headers['x-nf-client-connection-ip'] || req.headers['client-ip'];
+	if (typeof nfIp === 'string' && nfIp.length > 0) {
+		return nfIp.trim();
+	}
+	if (req.ip) {
+		return req.ip;
+	}
+	return '127.0.0.1';
+}
+
+/**
  * Standard rate limiter for general API endpoints.
  * Allows 100 requests per 15-minute window per IP by default.
  * Admin requests with valid X-API-Key are exempt.
@@ -27,8 +47,13 @@ function getMaxRequests(): number {
 export const apiRateLimiter = rateLimit({
 	windowMs: WINDOW_MS,
 	limit: () => getMaxRequests(),
-	standardHeaders: 'draft-8',
+	keyGenerator: (req: Request) => getClientIp(req),
+	standardHeaders: 'draft-7',
 	legacyHeaders: false,
+	validate: {
+		trustProxy: false,
+		xForwardedForHeader: false,
+	},
 	skip: (req: Request) => isValidAdmin(req),
 	handler: (_req: Request, res: Response) => {
 		const max = getMaxRequests();
@@ -46,8 +71,13 @@ export const apiRateLimiter = rateLimit({
 export const strictRateLimiter = rateLimit({
 	windowMs: WINDOW_MS,
 	limit: () => Math.max(10, Math.floor(getMaxRequests() / 3)),
-	standardHeaders: 'draft-8',
+	keyGenerator: (req: Request) => getClientIp(req),
+	standardHeaders: 'draft-7',
 	legacyHeaders: false,
+	validate: {
+		trustProxy: false,
+		xForwardedForHeader: false,
+	},
 	skip: (req: Request) => isValidAdmin(req),
 	handler: (_req: Request, res: Response) => {
 		res.status(429).json({
